@@ -1,3 +1,5 @@
+import { useMediaMemoryGuard } from "@/hooks/useMediaMemoryGuard";
+import { useShallow } from "zustand/react/shallow";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Camera, Mic, RefreshCw, ShieldCheck, Square, Waves } from "lucide-react";
@@ -19,17 +21,21 @@ export function VoiceVideoSettings() {
     setInputDevice,
     setOutputDevice,
     setKrispEnabled,
-  } = useVoiceStore();
+  } = useVoiceStore(useShallow((s) => ({ inputDeviceId: s.inputDeviceId, outputDeviceId: s.outputDeviceId, krispEnabled: s.krispEnabled, setInputDevice: s.setInputDevice, setOutputDevice: s.setOutputDevice, setKrispEnabled: s.setKrispEnabled })));
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [loading, setLoading] = useState(false);
   const [micTesting, setMicTesting] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
   const [cameraTesting, setCameraTesting] = useState(false);
+  useMediaMemoryGuard("device-test", micTesting || cameraTesting);
   const micStream = useRef<MediaStream | null>(null);
   const cameraStream = useRef<MediaStream | null>(null);
   const audioContext = useRef<AudioContext | null>(null);
   const animationFrame = useRef<number | null>(null);
   const video = useRef<HTMLVideoElement | null>(null);
+  const mounted = useRef(false);
+  const micGeneration = useRef(0);
+  const cameraGeneration = useRef(0);
 
   const refreshDevices = useCallback(async () => {
     setLoading(true);
@@ -43,6 +49,7 @@ export function VoiceVideoSettings() {
   }, []);
 
   const stopMicTest = useCallback(() => {
+    micGeneration.current += 1;
     if (animationFrame.current != null) cancelAnimationFrame(animationFrame.current);
     animationFrame.current = null;
     micStream.current?.getTracks().forEach((track) => track.stop());
@@ -55,17 +62,28 @@ export function VoiceVideoSettings() {
 
   const startMicTest = async () => {
     stopMicTest();
+    const generation = micGeneration.current;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      if (!mounted.current || generation !== micGeneration.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      micStream.current = stream;
       const context = new AudioContext();
+      audioContext.current = context;
       const analyser = context.createAnalyser();
       analyser.fftSize = 256;
       context.createMediaStreamSource(stream).connect(analyser);
       const values = new Uint8Array(analyser.frequencyBinCount);
-      micStream.current = stream;
-      audioContext.current = context;
       setMicTesting(true);
-      const sample = () => {
+      let lastSample = -Infinity;
+      const sample = (time: number) => {
+        if (document.visibilityState !== "visible" || time - lastSample < 80) {
+          animationFrame.current = requestAnimationFrame(sample);
+          return;
+        }
+        lastSample = time;
         analyser.getByteTimeDomainData(values);
         const rms = Math.sqrt(values.reduce((sum, value) => {
           const normalized = (value - 128) / 128;
@@ -74,13 +92,16 @@ export function VoiceVideoSettings() {
         setMicLevel(Math.min(100, Math.round(rms * 220)));
         animationFrame.current = requestAnimationFrame(sample);
       };
-      sample();
+      sample(performance.now());
     } catch (error) {
+      if (!mounted.current || generation !== micGeneration.current) return;
+      stopMicTest();
       toast.error(`Não foi possível acessar o microfone: ${String(error)}`);
     }
   };
 
   const stopCameraTest = useCallback(() => {
+    cameraGeneration.current += 1;
     cameraStream.current?.getTracks().forEach((track) => track.stop());
     cameraStream.current = null;
     if (video.current) video.current.srcObject = null;
@@ -89,22 +110,32 @@ export function VoiceVideoSettings() {
 
   const startCameraTest = async () => {
     stopCameraTest();
+    const generation = cameraGeneration.current;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      if (!mounted.current || generation !== cameraGeneration.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       cameraStream.current = stream;
       if (video.current) {
         video.current.srcObject = stream;
         await video.current.play();
       }
+      if (!mounted.current || generation !== cameraGeneration.current) return;
       setCameraTesting(true);
     } catch (error) {
+      if (!mounted.current || generation !== cameraGeneration.current) return;
+      stopCameraTest();
       toast.error(`Não foi possível acessar a câmera: ${String(error)}`);
     }
   };
 
   useEffect(() => {
+    mounted.current = true;
     void refreshDevices();
     return () => {
+      mounted.current = false;
       stopMicTest();
       stopCameraTest();
     };
@@ -157,7 +188,7 @@ export function VoiceVideoSettings() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
           <div>
             <h3 style={headingStyle}>Teste de microfone</h3>
-            <p style={descriptionStyle}>Mede a entrada local. Nenhum áudio é enviado.</p>
+            <p style={descriptionStyle}>Mede o áudio bruto do microfone. Nenhum áudio é enviado.</p>
           </div>
           <button onClick={micTesting ? stopMicTest : startMicTest} style={micTesting ? dangerButtonStyle : primaryButtonStyle}>
             {micTesting ? <Square size={15} /> : <Mic size={15} />}
@@ -174,7 +205,7 @@ export function VoiceVideoSettings() {
           <Waves size={24} color="var(--brand-500)" />
           <div>
             <h3 style={headingStyle}>Supressão de ruído RNNoise</h3>
-            <p style={descriptionStyle}>Filtro local aplicado ao microfone antes da codificação Opus.</p>
+            <p style={descriptionStyle}>Filtro local aplicado antes do Opus. Alterações entram em vigor na próxima ligação.</p>
           </div>
         </div>
         <input aria-label="Ativar RNNoise" type="checkbox" checked={krispEnabled} onChange={(event) => setKrispEnabled(event.target.checked)} style={{ width: 22, height: 22, accentColor: "var(--brand-500)" }} />

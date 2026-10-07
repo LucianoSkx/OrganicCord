@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useState, useRef, useEffect } from "react";
 import { useAccountStore, type PresenceStatus, type CustomStatus } from "@/stores/accountStore";
 import { useNavigationStore } from "@/stores/navigationStore";
@@ -52,8 +53,8 @@ function toAvatarStatus(s: ReturnType<typeof sessionToDisplayStatus>): "online" 
 }
 
 export function AccountSwitcher({ onAddAccount }: Props) {
-  const { accounts, sessions, presenceStatus, customStatus, removeAccount, setPresenceStatus, setCustomStatus, clearCustomStatus, stealthMode, hiddenAccountIds, toggleHideAccount } = useAccountStore();
-  const { activeAccountId, setActiveAccount } = useNavigationStore();
+  const { accounts, sessions, presenceStatus, customStatus, removeAccount, setPresenceStatus, setCustomStatus, clearCustomStatus, stealthMode, hiddenAccountIds, toggleHideAccount } = useAccountStore(useShallow((s) => ({ accounts: s.accounts, sessions: s.sessions, presenceStatus: s.presenceStatus, customStatus: s.customStatus, removeAccount: s.removeAccount, setPresenceStatus: s.setPresenceStatus, setCustomStatus: s.setCustomStatus, clearCustomStatus: s.clearCustomStatus, stealthMode: s.stealthMode, hiddenAccountIds: s.hiddenAccountIds, toggleHideAccount: s.toggleHideAccount })));
+  const { activeAccountId, setActiveAccount } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, setActiveAccount: s.setActiveAccount })));
   const [contextMenu, setContextMenu] = useState<{ account: StoredAccount; x: number; y: number } | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<StoredAccount | null>(null);
 

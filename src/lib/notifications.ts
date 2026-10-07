@@ -93,7 +93,7 @@ export function triggerDesktopNotification(account_id: string, message: DiscordM
   }
 
   if (hasMention) {
-    title = `💬 Mencionou você: ${title}`;
+    title = `Mencionou você: ${title}`;
   }
 
   // Formatação do conteúdo da mensagem

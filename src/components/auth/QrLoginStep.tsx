@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useEffect, useState, useRef } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { startQrLogin, cancelQrLogin } from "@/lib/tauri";
@@ -31,7 +32,7 @@ interface Props {
 export function QrLoginStep({ onBack, onSuccess, compact = false }: Props) {
   const [phase, setPhase] = useState<QrPhase>({ kind: "loading" });
   const unlistenRef = useRef<UnlistenFn | null>(null);
-  const { acceptAccount } = useAccountStore();
+  const { acceptAccount } = useAccountStore(useShallow((s) => ({ acceptAccount: s.acceptAccount })));
 
   useEffect(() => {
     let active = true;

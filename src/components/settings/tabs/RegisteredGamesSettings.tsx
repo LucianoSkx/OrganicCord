@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Cable, CheckCircle2, Gamepad2, Loader2, Monitor, Plus, Save, Trash2 } from "lucide-react";
+import { Gamepad2, Loader2, Monitor, Plus, Trash2 } from "lucide-react";
 import { useGameActivityStore } from "@/stores/gameActivityStore";
-import { useExternalLinkStore } from "@/stores/externalLinkStore";
+import { useNavigationStore } from "@/stores/navigationStore";
 
 export function RegisteredGamesSettings() {
   const {
@@ -9,13 +9,11 @@ export function RegisteredGamesSettings() {
     detectedGame,
     loading,
     error,
-    rpcSettings,
-    rpcStatus,
+    published,
+    readyAccountIds,
     loadSettings,
-    loadRpcSettings,
-    saveRpcSettings,
-    testDiscordRpc,
     setDetectionEnabled,
+    setPublishingEnabled,
     saveGame,
     removeGame,
     refreshAndSync,
@@ -23,22 +21,21 @@ export function RegisteredGamesSettings() {
   const [name, setName] = useState("");
   const [executable, setExecutable] = useState("");
   const [saving, setSaving] = useState(false);
-  const [applicationId, setApplicationId] = useState("");
-  const [rpcEnabled, setRpcEnabled] = useState(true);
+  const activeAccountId = useNavigationStore((state) => state.activeAccountId);
+  const detectedSignature = detectedGame && `${detectedGame.id}:${detectedGame.processId}:${detectedGame.startedAt}:${detectedGame.name}`;
+  const publishStatus = !settings?.publishEnabled
+    ? "publicação desativada"
+    : !activeAccountId
+      ? "selecione uma conta"
+      : !readyAccountIds.includes(activeAccountId)
+        ? "aguardando conexão da conta"
+        : published?.accountId === activeAccountId && published.signature === detectedSignature
+          ? "presença enviada"
+          : "enviando presença";
 
   useEffect(() => {
     if (!settings && !loading) void loadSettings();
   }, [settings, loading, loadSettings]);
-
-  useEffect(() => {
-    if (!rpcSettings) void loadRpcSettings();
-  }, [rpcSettings, loadRpcSettings]);
-
-  useEffect(() => {
-    if (!rpcSettings) return;
-    setApplicationId(rpcSettings.applicationId);
-    setRpcEnabled(rpcSettings.enabled);
-  }, [rpcSettings]);
 
   useEffect(() => {
     void refreshAndSync();
@@ -60,18 +57,6 @@ export function RegisteredGamesSettings() {
     }
   };
 
-  const saveAndTestRpc = async () => {
-    setSaving(true);
-    try {
-      await saveRpcSettings({ enabled: rpcEnabled, applicationId });
-      if (rpcEnabled && applicationId.trim()) await testDiscordRpc();
-    } catch {
-      // The store exposes the actionable error in this screen.
-    } finally {
-      setSaving(false);
-    }
-  };
-
   if (loading && !settings) {
     return <div style={{ display: "grid", minHeight: 180, placeItems: "center", color: "var(--text-muted)" }}><Loader2 className="spin" size={24} /></div>;
   }
@@ -81,9 +66,13 @@ export function RegisteredGamesSettings() {
       <header>
         <h2 style={{ fontSize: 20, fontWeight: 700, color: "var(--text-normal)" }}>Jogos Registrados</h2>
         <p style={{ marginTop: 6, maxWidth: 640, color: "var(--text-muted)", fontSize: 14, lineHeight: 1.45 }}>
-          Detecte jogos em execução e compartilhe “Jogando” com a conta aberta no Discord Desktop. O tempo começa quando o processo é confirmado.
+          O OrganicCord reconhece jogos pelo programa em execução e pode mostrar “Jogando” aos seus amigos pela conta ativa.
         </p>
       </header>
+
+      <section aria-label="Como mostrar um jogo no perfil" style={{ padding: "14px 16px", borderLeft: "3px solid var(--brand-500)", background: "var(--bg-secondary)", borderRadius: "var(--radius-sm)", color: "var(--text-normal)", fontSize: 13, lineHeight: 1.55 }}>
+        <strong>Para seus amigos verem “Jogando”:</strong> ative a detecção e a publicação, selecione a conta desejada no OrganicCord e abra o jogo. O Discord Desktop não precisa estar aberto. Jogos adicionados manualmente só entram na lista de programas a procurar.
+      </section>
 
       <section style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: 16, background: "var(--bg-secondary)", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -100,47 +89,34 @@ export function RegisteredGamesSettings() {
 
       <section aria-live="polite" style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 20, color: detectedGame ? "var(--status-online)" : "var(--text-muted)", fontSize: 13 }}>
         <span style={{ width: 8, height: 8, borderRadius: "50%", background: detectedGame ? "var(--status-online)" : "var(--text-muted)" }} />
-        {detectedGame ? <>Detectado agora: <strong style={{ color: "var(--text-normal)" }}>{detectedGame.name}</strong></> : "Nenhum jogo registrado em execução"}
+        {detectedGame ? <>Em execução: <strong style={{ color: "var(--text-normal)" }}>{detectedGame.name}</strong> · {publishStatus}</> : settings?.enabled ? "Nenhum jogo cadastrado está em execução" : "Detecção desativada"}
       </section>
 
       <section style={{ display: "flex", flexDirection: "column", gap: 14, padding: 16, background: "var(--bg-secondary)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-md)" }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 36, height: 36, display: "grid", placeItems: "center", flexShrink: 0, borderRadius: "var(--radius-md)", color: "var(--brand-500)", background: "rgba(88, 101, 242, 0.13)" }}><Cable size={18} /></div>
+            <div style={{ width: 36, height: 36, display: "grid", placeItems: "center", flexShrink: 0, borderRadius: "var(--radius-md)", color: "var(--brand-500)", background: "rgba(88, 101, 242, 0.13)" }}><Gamepad2 size={18} /></div>
             <div>
-              <h3 style={{ color: "var(--text-normal)", fontSize: 16, fontWeight: 650 }}>Publicar para amigos</h3>
-              <p style={{ marginTop: 3, color: "var(--text-muted)", fontSize: 13, lineHeight: 1.4 }}>Usa o RPC oficial do Discord Desktop. O Discord original precisa estar aberto.</p>
+              <h3 style={{ color: "var(--text-normal)", fontSize: 16, fontWeight: 650 }}>Mostrar jogo aos amigos</h3>
+              <p style={{ marginTop: 3, color: "var(--text-muted)", fontSize: 13, lineHeight: 1.4 }}>Envia a atividade pela conexão da conta ativa no OrganicCord.</p>
             </div>
           </div>
-          <label aria-label="Ativar publicação pelo Discord Desktop" style={{ display: "inline-flex", cursor: "pointer", padding: 4 }}>
-            <input type="checkbox" checked={rpcEnabled} onChange={(event) => setRpcEnabled(event.target.checked)} style={{ width: 18, height: 18, accentColor: "var(--brand-500)" }} />
+          <label aria-label="Mostrar jogo aos amigos" style={{ display: "inline-flex", cursor: "pointer", padding: 4 }}>
+            <input type="checkbox" checked={settings?.publishEnabled ?? false} onChange={(event) => void setPublishingEnabled(event.target.checked).catch(() => undefined)} style={{ width: 18, height: 18, accentColor: "var(--brand-500)" }} />
           </label>
-        </div>
-        <label style={{ display: "flex", flexDirection: "column", gap: 6, color: "var(--text-muted)", fontSize: 12, fontWeight: 600 }}>
-          Application ID do OrganicCord no Discord Developer Portal
-          <input value={applicationId} onChange={(event) => setApplicationId(event.target.value.replace(/\s/g, ""))} placeholder="Ex.: 123456789012345678" inputMode="numeric" aria-label="Application ID do Discord" maxLength={20} style={inputStyle} />
-        </label>
-        <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 12, lineHeight: 1.45 }}>
-          Crie uma aplicação e copie o <strong style={{ color: "var(--text-normal)" }}>Application ID</strong> em General Information. Nunca use o Client Secret. <button type="button" onClick={() => useExternalLinkStore.getState().openExternalLink("https://discord.com/developers/applications")} className="link-button">Abrir Developer Portal</button>
-        </p>
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
-          <button type="button" onClick={() => void saveAndTestRpc()} disabled={saving} className="brand-btn" style={{ display: "inline-flex", alignItems: "center", gap: 7, opacity: saving ? 0.7 : 1 }}>
-            {saving ? <Loader2 className="spin" size={15} /> : <Save size={15} />} Salvar e testar conexão
-          </button>
-          {rpcStatus?.connected && <span role="status" style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--status-online)", fontSize: 13 }}><CheckCircle2 size={15} /> {rpcStatus.message}</span>}
         </div>
       </section>
 
       <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div>
-          <h3 style={{ color: "var(--text-normal)", fontSize: 16, fontWeight: 650 }}>Adicionar manualmente</h3>
-          <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>Use o nome do arquivo executável, por exemplo, <code>meu-jogo.exe</code>.</p>
+          <h3 style={{ color: "var(--text-normal)", fontSize: 16, fontWeight: 650 }}>Cadastrar outro jogo</h3>
+          <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>Informe o nome exibido e o arquivo do processo (por exemplo, <code>meu-jogo.exe</code>). O jogo só será detectado enquanto esse programa estiver aberto.</p>
         </div>
         <form onSubmit={addGame} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) auto", gap: 8 }}>
           <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Nome exibido" aria-label="Nome exibido do jogo" maxLength={128} style={inputStyle} />
           <input value={executable} onChange={(event) => setExecutable(event.target.value)} placeholder="executavel.exe" aria-label="Executável do jogo" maxLength={260} style={inputStyle} />
           <button type="submit" disabled={saving || !name.trim() || !executable.trim()} className="brand-btn" style={{ display: "inline-flex", alignItems: "center", gap: 7, whiteSpace: "nowrap", opacity: saving ? 0.7 : 1 }}>
-            {saving ? <Loader2 className="spin" size={15} /> : <Plus size={16} />} Adicionar
+            {saving ? <Loader2 className="spin" size={15} /> : <Plus size={16} />} Cadastrar jogo
           </button>
         </form>
       </section>

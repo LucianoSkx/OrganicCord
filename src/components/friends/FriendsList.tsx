@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useMemo } from "react";
 import { useDiscordStore } from "@/stores/discordStore";
 import { useNavigationStore } from "@/stores/navigationStore";
@@ -11,7 +12,7 @@ interface Props {
 }
 
 export function FriendsList({ tab, searchQuery }: Props) {
-  const { activeAccountId, setActiveChannel } = useNavigationStore();
+  const { activeAccountId, setActiveChannel } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, setActiveChannel: s.setActiveChannel })));
   const relationships = useDiscordStore((s) => activeAccountId ? s.cache.relationships[activeAccountId] : []);
   const presences = useDiscordStore((s) => activeAccountId ? s.cache.presences[activeAccountId] : {});
   const openDM = useDiscordStore((s) => s.openDM);

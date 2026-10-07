@@ -400,6 +400,6 @@ export function applyTheme(settings: AppSettings) {
   }
 
   // Font size & message spacing
-  root.setProperty("--chat-font-size", `${settings.fontSize || 15}px`);
-  root.setProperty("--message-spacing", `${settings.messageSpacing || 16}px`);
+  root.setProperty("--chat-font-size", `${settings.fontSize ?? 15}px`);
+  root.setProperty("--message-spacing", `${settings.messageSpacing ?? 16}px`);
 }

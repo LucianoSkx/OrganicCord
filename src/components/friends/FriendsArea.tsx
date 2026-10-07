@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useState, useEffect } from "react";
 import { Users, HelpCircle, Inbox } from "lucide-react";
 import { FriendsList } from "./FriendsList";
@@ -13,8 +14,8 @@ export function FriendsArea() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
   
-  const { activeAccountId } = useNavigationStore();
-  const { fetchRelationships } = useDiscordStore();
+  const { activeAccountId } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId })));
+  const { fetchRelationships } = useDiscordStore(useShallow((s) => ({ fetchRelationships: s.fetchRelationships })));
 
   useEffect(() => {
     if (activeAccountId) {

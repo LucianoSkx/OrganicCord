@@ -16,7 +16,7 @@ An open-source, lightweight, multi-account desktop client for Discord on Windows
 
 ## Beta status
 
-OrganicCord is currently published as [`v0.2.0-beta.2`](https://github.com/aMathyzinn/OrganicCord/releases/tag/v0.2.0-beta.2). The beta covers the core communication and voice flows, but it is not intended to match every feature of the official Discord client.
+OrganicCord is currently published as [`v0.3.0-beta.1`](https://github.com/aMathyzinn/OrganicCord/releases/tag/v0.3.0-beta.1). This release expands the lightweight desktop client with improved voice processing, game presence, and a more responsive chat experience. It is not intended to match every feature of the official Discord client.
 
 | Available now | Not available yet |
 | --- | --- |
@@ -27,20 +27,20 @@ OrganicCord is currently published as [`v0.2.0-beta.2`](https://github.com/aMath
 
 ## Install on Windows
 
-1. Download `OrganicCord_0.2.0-beta.2_x64-setup.exe` from the [release page](https://github.com/aMathyzinn/OrganicCord/releases/tag/v0.2.0-beta.2).
+1. Download `OrganicCord_0.3.0-beta.1_x64-setup.exe` from the [release page](https://github.com/aMathyzinn/OrganicCord/releases/tag/v0.3.0-beta.1).
 2. Run the installer on a Windows 10 or Windows 11 computer with WebView2 installed.
 3. Sign in and grant only the permissions required by the features you choose to use.
 
 The current installer is not code-signed yet. Windows may show an unknown publisher warning; verify that the file came from the official release and check its hash before installing. Do not disable Windows security features to run the app.
 
 ```powershell
-Get-FileHash .\OrganicCord_0.2.0-beta.2_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\OrganicCord_0.3.0-beta.1_x64-setup.exe -Algorithm SHA256
 ```
 
-`v0.2.0-beta.2` SHA-256:
+`v0.3.0-beta.1` SHA-256:
 
 ```text
-4C0628E533631F2338F68DE997014B2BB8840FBCCDD22D34C8DB4D9CF50DED52
+4ED50107A54324694462F48CA2AFCF374838EA6AE075C90B458EF30059A00FED
 ```
 
 ## What you can do
@@ -70,7 +70,7 @@ Voice transport uses Opus. A call is only treated as connected after the voice g
 - Mute servers, channels, or users for a chosen duration.
 - Customize themes, contrast, density, message size, app icon, and keyboard shortcuts.
 - Update your avatar, bio, and profile color. Image banners remain subject to Discord account eligibility.
-- Detect local games and publish Rich Presence through an open Discord Desktop client.
+- Detect supported local games and publish a basic “Playing” presence directly through the active OrganicCord account, without requiring Discord Desktop.
 
 ## Technical architecture
 
@@ -149,7 +149,6 @@ Using an isolated build directory avoids conflicts with an already-running Organ
 
 - [Contributing guide](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
-- [Release checklist](RELEASE_CHECKLIST.md)
 - [Official repository](https://github.com/aMathyzinn/OrganicCord)
 - [Creator portfolio](https://damodara.xyz)
 

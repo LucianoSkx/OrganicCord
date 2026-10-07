@@ -1,28 +1,61 @@
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
-use reqwest::Client;
+use once_cell::sync::Lazy;
+use reqwest::header::{HeaderValue, AUTHORIZATION};
+use reqwest::{Client, IntoUrl, RequestBuilder};
 use std::time::Duration;
 
-/// Returns a Discord-ready reqwest Client authenticated with the given token.
-/// Uses an explicit product User-Agent instead of impersonating Discord's web client.
-/// Each call builds a new Client, but reqwest Client is cheaply cloneable and
-/// they all share the underlying OS TCP connection pool.
-pub fn discord_client(token: &str) -> Result<Client, String> {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        AUTHORIZATION,
-        HeaderValue::from_str(token).map_err(|e| format!("invalid token header: {e}"))?,
-    );
-
-    headers.insert(
-        "User-Agent",
-        HeaderValue::from_static(concat!("OrganicCord/", env!("CARGO_PKG_VERSION"))),
-    );
-
+static TRANSPORT: Lazy<Result<Client, String>> = Lazy::new(|| {
     Client::builder()
         .timeout(Duration::from_secs(15))
-        .default_headers(headers)
+        .pool_idle_timeout(Duration::from_secs(30))
+        .pool_max_idle_per_host(2)
+        .user_agent(concat!("OrganicCord/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| format!("failed to build discord client: {e}"))
+});
+
+// The transport owns the pool; authentication belongs to each request, never to
+// a shared default header. A request from another account cannot inherit it.
+#[derive(Clone)]
+pub struct DiscordClient {
+    transport: Client,
+    authorization: HeaderValue,
+}
+
+pub fn discord_client(token: &str) -> Result<DiscordClient, String> {
+    let mut authorization = HeaderValue::from_str(token)
+        .map_err(|e| format!("invalid token header: {e}"))?;
+    authorization.set_sensitive(true);
+    Ok(DiscordClient {
+        transport: TRANSPORT.as_ref().map_err(Clone::clone)?.clone(),
+        authorization,
+    })
+}
+
+macro_rules! authenticated_methods {
+    ($($method:ident),+) => {
+        impl DiscordClient {
+            $(pub fn $method(&self, url: impl IntoUrl) -> RequestBuilder {
+                self.transport.$method(url).header(AUTHORIZATION, self.authorization.clone())
+            })+
+        }
+    };
+}
+authenticated_methods!(get, post, put, patch, delete);
+
+#[cfg(test)]
+mod transport_tests {
+    use super::*;
+
+    #[test]
+    fn shared_transport_keeps_account_headers_separate() {
+        let first = discord_client("account-one").unwrap();
+        let second = discord_client("account-two").unwrap();
+        let a = first.get("https://discord.com/api/v10/users/@me").build().unwrap();
+        let b = second.post("https://discord.com/api/v10/channels/1/messages").build().unwrap();
+        assert_eq!(a.headers()[AUTHORIZATION], "account-one");
+        assert_eq!(b.headers()[AUTHORIZATION], "account-two");
+        assert!(a.headers()[AUTHORIZATION].is_sensitive());
+    }
 }
 
 /// Retry configuration for HTTP requests.

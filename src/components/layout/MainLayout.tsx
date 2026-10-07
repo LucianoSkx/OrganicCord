@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useState, useEffect } from "react";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { useDiscordStore } from "@/stores/discordStore";
@@ -24,21 +25,23 @@ interface Props {
 }
 
 export function MainLayout({ onAddAccount }: Props) {
-  const { view, activeGuildId, activeChannelId, activeAccountId } = useNavigationStore();
-  const { fetchDMs, cache } = useDiscordStore();
+  const { view, activeGuildId, activeChannelId, activeAccountId } = useNavigationStore(useShallow((s) => ({ view: s.view, activeGuildId: s.activeGuildId, activeChannelId: s.activeChannelId, activeAccountId: s.activeAccountId })));
+  const fetchDMs = useDiscordStore((s) => s.fetchDMs);
+  const activeChannels = useDiscordStore((s) => activeAccountId && activeGuildId ? s.cache.channels[activeAccountId]?.[activeGuildId] : undefined);
+  const activeDms = useDiscordStore((s) => activeAccountId ? s.cache.dms[activeAccountId] : undefined);
   const {
     accountId: voiceAccountId,
     channelId: voiceChannelId,
     screenShareStatus,
     screenShareViewOpen,
-  } = useVoiceStore();
+  } = useVoiceStore(useShallow((s) => ({ accountId: s.accountId, channelId: s.channelId, screenShareStatus: s.screenShareStatus, screenShareViewOpen: s.screenShareViewOpen })));
 
   const activeChannel = activeGuildId && activeChannelId 
-    ? cache.channels[activeAccountId ?? ""]?.[activeGuildId]?.find(c => c.id === activeChannelId)
+    ? activeChannels?.find(c => c.id === activeChannelId)
     : null;
   const isForum = activeChannel?.channel_type === 15;
   const activeDm = activeAccountId && activeChannelId
-    ? cache.dms[activeAccountId]?.find((dm) => dm.id === activeChannelId)
+    ? activeDms?.find((dm) => dm.id === activeChannelId)
     : undefined;
   const screenShareRecipient = activeChannelId === voiceChannelId
     ? activeDm?.recipients?.[0]
@@ -216,10 +219,13 @@ function DMList({ accountId, fetchDMs }: { accountId: string | null; fetchDMs: (
 }
 
 function DMSidebarList({ accountId, searchQuery }: { accountId: string; searchQuery: string }) {
-  const { setActiveChannel, activeChannelId } = useNavigationStore();
-  const { cache, closeDM } = useDiscordStore();
+  const { setActiveChannel, activeChannelId } = useNavigationStore(useShallow((s) => ({ setActiveChannel: s.setActiveChannel, activeChannelId: s.activeChannelId })));
+  const closeDM = useDiscordStore((s) => s.closeDM);
+  const cachedDms = useDiscordStore((s) => s.cache.dms[accountId]);
+  const presences = useDiscordStore((s) => s.cache.presences[accountId]);
+  const unreads = useDiscordStore((s) => s.cache.unreads[accountId]);
   const archivedDMs = useArchiveStore(state => state.archivedDMs[accountId] || []);
-  const dms = cache.dms[accountId] ?? [];
+  const dms = cachedDms ?? [];
 
   const visibleDMs = dms.filter((dm: DiscordDM) => !archivedDMs.includes(dm.id));
 
@@ -280,10 +286,10 @@ function DMSidebarList({ accountId, searchQuery }: { accountId: string; searchQu
                   username={recipient.username}
                   size={32}
                   showStatus={true}
-                  status={cache.presences[accountId]?.[recipient.id]?.status || "offline"}
+                  status={presences?.[recipient.id]?.status || "offline"}
                 />
                 {(() => {
-                  const presence = cache.presences[accountId]?.[recipient.id];
+                  const presence = presences?.[recipient.id];
                   const activities = presence?.activities?.filter((activity) => activity.type !== 4) || [];
                   const mainActivity = activities[0];
                   
@@ -304,7 +310,7 @@ function DMSidebarList({ accountId, searchQuery }: { accountId: string; searchQu
 
                 {/* Unread Badge */}
                 {(() => {
-                  const unread = cache.unreads[accountId]?.[dm.id];
+                  const unread = unreads?.[dm.id];
                   if (!unread || unread.count === 0) return null;
                   return (
                     <div

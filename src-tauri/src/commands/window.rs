@@ -1,3 +1,5 @@
+use tauri::Manager;
+
 /// Minimiza a janela principal.
 #[tauri::command]
 pub async fn minimize_window(window: tauri::Window) -> Result<(), String> {
@@ -23,8 +25,14 @@ pub async fn close_window(window: tauri::Window) -> Result<(), String> {
 /// Exibe, desminimiza e foca a janela principal.
 #[tauri::command]
 pub async fn focus_window(window: tauri::Window) -> Result<(), String> {
+    crate::performance::restore(window.app_handle());
     let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_focus();
     Ok(())
+}
+
+#[tauri::command]
+pub fn exit_app(app: tauri::AppHandle) {
+    app.exit(0);
 }

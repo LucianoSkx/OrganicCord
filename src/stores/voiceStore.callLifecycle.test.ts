@@ -32,11 +32,13 @@ vi.mock("@/lib/soundService", () => ({
 
 import { useVoiceStore } from "./voiceStore";
 import { useAccountStore } from "./accountStore";
+import { useSettingsStore } from "./settingsStore";
 
 describe("voiceStore call lifecycle & ringing UX", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     tauriMocks.invoke.mockResolvedValue("attempt-123");
+    useSettingsStore.setState((state) => ({ settings: { ...state.settings, soundUserJoin: true, soundUserLeave: true } }));
 
     useAccountStore.setState({
       accounts: [
@@ -96,6 +98,44 @@ describe("voiceStore call lifecycle & ringing UX", () => {
     expect(state.voiceParticipants.size).toBe(2);
     expect(soundMocks.stopOutgoingRing).toHaveBeenCalledTimes(1);
     expect(soundMocks.playUserJoined).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not replay join and leave sounds for repeated voice or speaking events", async () => {
+    await useVoiceStore.getState().joinCall("account-1", null, "channel-dm-1");
+    const voice = useVoiceStore.getState();
+
+    voice.setSpeaking("user-remote", true);
+    voice.setSpeaking("user-remote", false);
+    expect(useVoiceStore.getState().voiceParticipants.has("user-remote")).toBe(false);
+    expect(soundMocks.playUserJoined).not.toHaveBeenCalled();
+
+    voice.setVoiceParticipant("user-remote", true);
+    voice.setVoiceParticipant("user-remote", true);
+    voice.setVoiceParticipant("user-remote", false);
+    voice.setVoiceParticipant("user-remote", false);
+    expect(soundMocks.playUserJoined).toHaveBeenCalledTimes(1);
+    expect(soundMocks.playUserLeft).toHaveBeenCalledTimes(1);
+  });
+
+  it("respects call sound preferences", async () => {
+    await useVoiceStore.getState().joinCall("account-1", null, "channel-dm-1");
+    useSettingsStore.setState((state) => ({ settings: { ...state.settings, soundUserJoin: false, soundUserLeave: false } }));
+    const voice = useVoiceStore.getState();
+    voice.setVoiceParticipant("user-remote", true);
+    voice.setVoiceParticipant("user-remote", false);
+    expect(soundMocks.playUserJoined).not.toHaveBeenCalled();
+    expect(soundMocks.playUserLeft).not.toHaveBeenCalled();
+  });
+
+  it("does not start unfinished screen sharing through the voice store", async () => {
+    await useVoiceStore.getState().joinCall("account-1", null, "channel-dm-1");
+    useVoiceStore.setState({ isConnected: true });
+    tauriMocks.invoke.mockClear();
+
+    await useVoiceStore.getState().startScreenShare();
+
+    expect(tauriMocks.invoke).not.toHaveBeenCalledWith("start_screen_share", expect.anything());
+    expect(useVoiceStore.getState().screenShareError).toContain("em desenvolvimento");
   });
 
   it("synchronizes participants and stops ring on CALL_UPDATE", async () => {

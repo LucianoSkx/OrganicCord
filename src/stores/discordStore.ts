@@ -12,9 +12,13 @@ import type {
   DiscordMember,
   DiscordThread,
   DiscordGatewayGuild,
+  Reaction,
 } from "@/types";
 import * as api from "@/lib/tauri";
 import { checkMessageSendLimit, checkMessageDeleteLimit, checkReactionLimit } from "@/lib/rateLimiter";
+import { accountCacheKey, mergeMessages, pruneMessageCache, type MessagePage } from "@/lib/messageCache";
+import { scheduleEmojiPersistence, clearEmojiPersistence } from "@/lib/emojiPersistence";
+import { normalizeReactionEmoji, sameReactionEmoji } from "@/lib/emoji";
 
 export function normalizePresence(presence: DiscordPresence | null | undefined): { userId: string; normalized: DiscordPresence } | null {
   if (!presence?.user?.id) return null;
@@ -106,8 +110,70 @@ function nextChannelRequestId(accountId: string, guildId: string): string {
   return `${accountId}:${guildId}:${channelRequestSequence}`;
 }
 
+const messageRequests = new Map<string, Promise<void>>();
+const accountEpochs = new Map<string, number>();
+const epochFor = (accountId: string) => accountEpochs.get(accountId) ?? 0;
+let reactionRevision = 0;
+const reactionRevisions = new Map<string, number>();
+const pendingReactionMutations = new Map<string, number>();
+
+function reactionMessageKey(accountId: string, channelId: string, messageId: string): string {
+  return `${accountCacheKey(accountId, channelId)}:${messageId}`;
+}
+
+function markReactionChanged(key: string): void {
+  reactionRevisions.set(key, ++reactionRevision);
+  if (reactionRevisions.size > 2_000) {
+    const oldestKey = reactionRevisions.keys().next().value;
+    if (oldestKey) reactionRevisions.delete(oldestKey);
+  }
+}
+
+function beginReactionMutation(key: string): void {
+  pendingReactionMutations.set(key, (pendingReactionMutations.get(key) ?? 0) + 1);
+  markReactionChanged(key);
+}
+
+function endReactionMutation(key: string): void {
+  const pending = pendingReactionMutations.get(key) ?? 0;
+  if (pending <= 1) pendingReactionMutations.delete(key);
+  else pendingReactionMutations.set(key, pending - 1);
+}
+
+function mergeFetchedMessages(
+  key: string,
+  current: DiscordMessage[],
+  incoming: DiscordMessage[],
+  startedAtRevision: number,
+): DiscordMessage[] {
+  const merged = mergeMessages(current, incoming);
+  const currentById = new Map(current.map((message) => [message.id, message]));
+  for (const message of merged) {
+    const reactionKey = `${key}:${message.id}`;
+    if (!pendingReactionMutations.has(reactionKey) && (reactionRevisions.get(reactionKey) ?? 0) <= startedAtRevision) continue;
+    const currentMessage = currentById.get(message.id);
+    if (currentMessage) message.reactions = currentMessage.reactions;
+  }
+  return merged;
+}
+
+function messageRequest(key: string, operation: () => Promise<void>): Promise<void> {
+  const existing = messageRequests.get(key);
+  if (existing) return existing;
+  const request = Promise.resolve().then(operation).finally(() => {
+    if (messageRequests.get(key) === request) messageRequests.delete(key);
+  });
+  messageRequests.set(key, request);
+  return request;
+}
+
 interface DiscordStore {
   cache: DiscordCache;
+  activeMessageKey: string | null;
+  messagePages: Record<string, MessagePage>;
+  activateMessageChannel: (accountId: string, channelId: string) => void;
+  setHistoryExpanded: (accountId: string, channelId: string, expanded: boolean) => void;
+  recoverMessages: (accountId: string, channelId: string) => Promise<void>;
   loading: LoadingState;
   channelLoads: Record<string, Record<string, GuildChannelLoadState>>;
   errors: Record<string, string>;
@@ -154,13 +220,14 @@ interface DiscordStore {
   ) => Promise<void>;
   addReaction: (accountId: string, channelId: string, messageId: string, emoji: string) => Promise<void>;
   removeReaction: (accountId: string, channelId: string, messageId: string, emoji: string) => Promise<void>;
-  prependMessage: (channelId: string, message: DiscordMessage) => void;
-  updateMessageFromGateway: (channelId: string, message: Partial<DiscordMessage> & { id: string }) => void;
-  removeMessageFromGateway: (channelId: string, messageId: string) => void;
+  prependMessage: (accountId: string, channelId: string, message: DiscordMessage) => void;
+  updateMessageFromGateway: (accountId: string, channelId: string, message: Partial<DiscordMessage> & { id: string }) => void;
+  removeMessageFromGateway: (accountId: string, channelId: string, messageId: string) => void;
   applyGatewayReaction: (
+    accountId: string,
     channelId: string,
     messageId: string,
-    emoji: { id: string | null; name: string },
+    emoji: Reaction["emoji"],
     added: boolean,
     isCurrentUser: boolean
   ) => void;
@@ -171,10 +238,19 @@ interface DiscordStore {
   updatePresences: (accountId: string, presences: DiscordPresence[]) => void;
   incrementUnread: (accountId: string, channelId: string, hasMention: boolean, guildId?: string) => void;
   clearUnread: (accountId: string, channelId: string, messageId?: string) => Promise<void>;
-  addTypingUser: (channelId: string, userId: string, timestamp: number, member?: DiscordMember) => void;
+  addTypingUser: (accountId: string, channelId: string, userId: string, timestamp: number, member?: DiscordMember) => void;
   clearCache: (accountId: string) => void;
   blockUser: (accountId: string, userId: string) => Promise<void>;
   unblockUser: (accountId: string, userId: string) => Promise<void>;
+}
+
+export function pruneDiscordMessageCache(s: Pick<DiscordStore, "cache" | "messagePages" | "activeMessageKey" | "loading" | "errors">) {
+  for (const key of pruneMessageCache(s.cache.messages, s.messagePages, s.activeMessageKey)) {
+    delete s.cache.pinnedMessages[key];
+    delete s.cache.typingUsers[key];
+    delete s.loading.messages[key];
+    delete s.errors[`messages-${key}`];
+  }
 }
 
 export const useDiscordStore = create<DiscordStore>()(
@@ -206,10 +282,12 @@ export const useDiscordStore = create<DiscordStore>()(
     },
 
     fetchGuilds: async (accountId) => {
+      const epoch = epochFor(accountId);
       if (get().loading.guilds[accountId]) return;
       set((s) => { s.loading.guilds[accountId] = true; });
       try {
         const guilds = await api.getGuilds(accountId);
+        if (epochFor(accountId) !== epoch) return;
         // Ordena por nome
         guilds.sort((a, b) => a.name.localeCompare(b.name));
         
@@ -226,6 +304,7 @@ export const useDiscordStore = create<DiscordStore>()(
           s.loading.guilds[accountId] = false;
         });
       } catch (e) {
+        if (epochFor(accountId) !== epoch) return;
         console.error("[discordStore] fetchGuilds failed:", e);
         set((s) => {
           s.errors[`guilds-${accountId}`] = String(e);
@@ -441,68 +520,162 @@ export const useDiscordStore = create<DiscordStore>()(
     },
 
     fetchForumThreads: async (accountId, channelId, guildId) => {
+      const epoch = epochFor(accountId);
       if (!accountId || !channelId || !guildId) return;
-      if (get().loading.threads[channelId]) return;
-      set((s) => { s.loading.threads[channelId] = true; });
+      if (get().loading.threads[accountCacheKey(accountId, channelId)]) return;
+      set((s) => { s.loading.threads[accountCacheKey(accountId, channelId)] = true; });
       try {
         const response = await api.getForumThreads(accountId, channelId, guildId);
         // Dependendo da estrutura de search, pode ter 'threads', 'posts', ou a array pode estar na raiz
         const threads = response.threads || (Array.isArray(response) ? response : []);
+        if (epochFor(accountId) !== epoch) return;
         set((s) => {
           // Salvar threads na key do guildId, mas como não temos o guildId aqui facilmente,
           // podemos mapear por channelId? Wait! A cache.threads é Record<string, any[]>.
           // Vamos continuar usando cache.threads, mas salvar na key do channelId para simplificar o ForumArea.
-          s.cache.threads[channelId] = threads;
-          s.loading.threads[channelId] = false;
+          s.cache.threads[accountCacheKey(accountId, channelId)] = threads;
+          s.loading.threads[accountCacheKey(accountId, channelId)] = false;
         });
       } catch (e) {
+        if (epochFor(accountId) !== epoch) return;
         console.error(`[discordStore] Error fetching forum threads:`, e);
         set((s) => {
-          s.errors[`threads-${channelId}`] = String(e);
-          s.loading.threads[channelId] = false;
+          s.errors[`threads-${accountCacheKey(accountId, channelId)}`] = String(e);
+          s.loading.threads[accountCacheKey(accountId, channelId)] = false;
         });
       }
     },
 
-    fetchMessages: async (accountId, channelId) => {
-      set((s) => { s.loading.messages[channelId] = true; });
-      try {
-        const messages = await api.getMessages(accountId, channelId);
-        set((s) => {
-          s.cache.messages[channelId] = messages;
-          s.loading.messages[channelId] = false;
-        });
-      } catch (e) {
-        set((s) => {
-          s.errors[`messages-${channelId}`] = String(e);
-          s.loading.messages[channelId] = false;
-        });
-      }
+    activeMessageKey: null,
+    messagePages: {},
+    activateMessageChannel: (accountId, channelId) => {
+      const key = accountCacheKey(accountId, channelId);
+      set((s) => {
+        if (s.activeMessageKey && s.activeMessageKey !== key) delete s.cache.typingUsers[s.activeMessageKey];
+        const now = Date.now();
+        for (const typingKey of Object.keys(s.cache.typingUsers)) {
+          const activeUsers = s.cache.typingUsers[typingKey].filter((user) => now - user.timestamp < 10_000);
+          if (activeUsers.length) s.cache.typingUsers[typingKey] = activeUsers;
+          else delete s.cache.typingUsers[typingKey];
+        }
+        s.activeMessageKey = key;
+        s.messagePages[key] = { ...s.messagePages[key], lastAccess: Date.now(), hasMore: s.messagePages[key]?.hasMore ?? true, historyExpanded: false };
+        pruneDiscordMessageCache(s);
+      });
     },
-
-    fetchMoreMessages: async (accountId, channelId) => {
-      const existing = get().cache.messages[channelId];
-      if (!existing || existing.length === 0) return;
-
-      const oldest = existing[existing.length - 1];
-      try {
-        const older = await api.getMessages(accountId, channelId, oldest.id);
-        set((s) => {
-          const cur = s.cache.messages[channelId] ?? [];
-          const curIds = new Set(cur.map((m) => m.id));
-          const toAdd = older.filter((m) => !curIds.has(m.id));
-          s.cache.messages[channelId] = [...cur, ...toAdd];
-        });
-      } catch (e) {
-        set((s) => { s.errors[`messages-${channelId}`] = String(e); });
-      }
+    setHistoryExpanded: (accountId, channelId, expanded) => {
+      const key = accountCacheKey(accountId, channelId);
+      if (get().messagePages[key]?.historyExpanded === expanded) return;
+      set((s) => {
+        if (s.messagePages[key]) s.messagePages[key].historyExpanded = expanded;
+        if (!expanded) pruneDiscordMessageCache(s);
+      });
+    },
+    fetchMessages: (accountId, channelId) => {
+      const key = accountCacheKey(accountId, channelId);
+      const epoch = epochFor(accountId);
+      const startedAtRevision = reactionRevision;
+      return messageRequest(`${key}:recent`, async () => {
+        if (epochFor(accountId) !== epoch) return;
+        set((s) => { s.loading.messages[key] = true; });
+        try {
+          const messages = await api.getMessages(accountId, channelId);
+          if (epochFor(accountId) !== epoch) return;
+          set((s) => {
+            s.cache.messages[key] = mergeFetchedMessages(key, s.cache.messages[key] ?? [], messages, startedAtRevision);
+            s.messagePages[key] = { lastAccess: Date.now(), hasMore: messages.length >= 50, historyExpanded: false };
+            pruneDiscordMessageCache(s);
+            delete s.errors[`messages-${key}`];
+          });
+        } catch (e) {
+          if (epochFor(accountId) === epoch) set((s) => { s.errors[`messages-${key}`] = String(e); });
+        } finally {
+          if (epochFor(accountId) === epoch) set((s) => { s.loading.messages[key] = false; });
+        }
+      });
+    },
+    recoverMessages: (accountId, channelId) => {
+      const key = accountCacheKey(accountId, channelId);
+      const epoch = epochFor(accountId);
+      return messageRequest(`${key}:recover`, async () => {
+        const initial = messageRequests.get(`${key}:recent`);
+        if (initial) await initial;
+        if (epochFor(accountId) !== epoch) return;
+        const existing = get().cache.messages[key];
+        let cursor = existing?.find((m) => /^\d+$/.test(m.id))?.id;
+        if (!cursor) { await get().fetchMessages(accountId, channelId); return; }
+        try {
+          // Paginate the gap, not just its first 50 messages. Every page advances
+          // the cursor even if its messages already arrived through the Gateway.
+          while (epochFor(accountId) === epoch && get().activeMessageKey === key) {
+            const fresh = await api.getMessages(accountId, channelId, undefined, cursor);
+            if (epochFor(accountId) !== epoch || !get().cache.messages[key]) return;
+            if (!fresh.length) break;
+            const next = mergeMessages([], fresh).find((m) => /^\d+$/.test(m.id))?.id;
+            set((s) => {
+              s.cache.messages[key] = mergeMessages(s.cache.messages[key] ?? [], fresh);
+              pruneDiscordMessageCache(s);
+            });
+            if (!next || BigInt(next) <= BigInt(cursor)) break;
+            cursor = next;
+            if (fresh.length < 50) break;
+          }
+          if (epochFor(accountId) !== epoch || get().activeMessageKey !== key) return;
+          // Creation events cannot recover edits/deletions missed while offline.
+          // Reconcile the recent window once per recovery, preserving older pages
+          // and messages received through the Gateway during this request.
+          const upper = get().cache.messages[key]?.find((message) => /^\d+$/.test(message.id))?.id;
+          const recentReactionRevision = reactionRevision;
+          const recent = await api.getMessages(accountId, channelId);
+          if (epochFor(accountId) !== epoch || !get().cache.messages[key]) return;
+          const sorted = mergeMessages([], recent);
+          const numeric = sorted.filter((message) => /^\d+$/.test(message.id));
+          const oldest = numeric[numeric.length - 1]?.id;
+          const ids = new Set(recent.map((message) => message.id));
+          set((s) => {
+            const retained = s.cache.messages[key].filter((message) => {
+              if (!/^\d+$/.test(message.id) || ids.has(message.id) || !upper) return true;
+              return BigInt(message.id) > BigInt(upper) || (recent.length >= 50 && oldest !== undefined && BigInt(message.id) < BigInt(oldest));
+            });
+            s.cache.messages[key] = mergeFetchedMessages(key, retained, recent, recentReactionRevision);
+            pruneDiscordMessageCache(s);
+          });
+          set((s) => { delete s.errors[`messages-${key}`]; });
+        } catch (e) {
+          if (epochFor(accountId) === epoch) set((s) => { s.errors[`messages-${key}`] = String(e); });
+        }
+      });
+    },
+    fetchMoreMessages: (accountId, channelId) => {
+      const key = accountCacheKey(accountId, channelId);
+      const epoch = epochFor(accountId);
+      return messageRequest(`${key}:older`, async () => {
+        if (epochFor(accountId) !== epoch) return;
+        if (get().messagePages[key]?.hasMore === false) return;
+        const oldest = [...(get().cache.messages[key] ?? [])].reverse().find((m) => /^\d+$/.test(m.id));
+        if (!oldest) return;
+        try {
+          const older = await api.getMessages(accountId, channelId, oldest.id);
+          if (epochFor(accountId) !== epoch || !get().cache.messages[key]) return;
+          set((s) => {
+            s.cache.messages[key] = mergeMessages(s.cache.messages[key] ?? [], older);
+            s.messagePages[key] = { lastAccess: Date.now(), hasMore: older.length >= 50, historyExpanded: true };
+            pruneDiscordMessageCache(s);
+          });
+        } catch (e) {
+          if (epochFor(accountId) === epoch) set((s) => { s.errors[`messages-${key}`] = String(e); });
+        }
+      });
     },
 
     fetchDMs: async (accountId) => {
+      const epoch = epochFor(accountId);
       try {
         const dms = await api.getDMs(accountId);
+        if (epochFor(accountId) !== epoch) return;
         set((s) => { s.cache.dms[accountId] = dms; });
       } catch (e) {
+        if (epochFor(accountId) !== epoch) return;
         set((s) => { s.errors[`dms-${accountId}`] = String(e); });
       }
     },
@@ -521,9 +694,11 @@ export const useDiscordStore = create<DiscordStore>()(
     },
 
     fetchPinnedMessages: async (accountId, channelId) => {
+      const epoch = epochFor(accountId);
       try {
         const pins = await api.getPinnedMessages(accountId, channelId);
-        set((s) => { s.cache.pinnedMessages[channelId] = pins; });
+        if (epochFor(accountId) !== epoch) return;
+        set((s) => { s.cache.pinnedMessages[accountCacheKey(accountId, channelId)] = pins; });
       } catch (e) {
         console.error("Erro ao buscar mensagens fixadas:", e);
       }
@@ -571,6 +746,7 @@ export const useDiscordStore = create<DiscordStore>()(
     },
 
     fetchRelationships: async (accountId) => {
+      const epoch = epochFor(accountId);
       try {
         const [rels, presences] = await Promise.all([
           api.getRelationships(accountId),
@@ -579,6 +755,7 @@ export const useDiscordStore = create<DiscordStore>()(
             return [];
           })
         ]);
+        if (epochFor(accountId) !== epoch) return;
         set((s) => { 
           s.cache.relationships[accountId] = rels; 
           if (!s.cache.presences[accountId]) {
@@ -600,6 +777,7 @@ export const useDiscordStore = create<DiscordStore>()(
           }
         });
       } catch (e) {
+        if (epochFor(accountId) !== epoch) return;
         console.error("fetchRelationships error:", e);
         set((s) => { s.errors[`relationships-${accountId}`] = String(e); });
       }
@@ -658,7 +836,7 @@ export const useDiscordStore = create<DiscordStore>()(
             avatar: null,
             bot: true,
           },
-          content: `⚠️ ${rateError}`,
+          content: rateError,
           timestamp: new Date().toISOString(),
           edited_timestamp: null,
           attachments: [],
@@ -666,13 +844,13 @@ export const useDiscordStore = create<DiscordStore>()(
           pinned: false,
           type: 0,
         };
-        get().prependMessage(channelId, clydeMsg);
+        get().prependMessage(accountId, channelId, clydeMsg);
         return;
       }
 
       try {
         const message = await api.sendMessage(accountId, channelId, content, replyTo);
-        get().prependMessage(channelId, message);
+        get().prependMessage(accountId, channelId, message);
       } catch (err: unknown) {
         console.error("Erro ao enviar mensagem:", err);
         const clydeMsg: DiscordMessage = {
@@ -694,7 +872,7 @@ export const useDiscordStore = create<DiscordStore>()(
           pinned: false,
           type: 0,
         };
-        get().prependMessage(channelId, clydeMsg);
+        get().prependMessage(accountId, channelId, clydeMsg);
         throw err;
       }
     },
@@ -703,7 +881,7 @@ export const useDiscordStore = create<DiscordStore>()(
       try {
         const msg = await api.editMessage(accountId, channelId, messageId, content);
         set((s) => {
-          const channelMsgs = s.cache.messages[channelId];
+          const channelMsgs = s.cache.messages[accountCacheKey(accountId, channelId)];
           if (channelMsgs) {
             const idx = channelMsgs.findIndex((m) => m.id === messageId);
             if (idx !== -1) {
@@ -727,9 +905,9 @@ export const useDiscordStore = create<DiscordStore>()(
       try {
         await api.deleteMessage(accountId, channelId, messageId);
         set((s) => {
-          const channelMsgs = s.cache.messages[channelId];
+          const channelMsgs = s.cache.messages[accountCacheKey(accountId, channelId)];
           if (channelMsgs) {
-            s.cache.messages[channelId] = channelMsgs.filter((m) => m.id !== messageId);
+            s.cache.messages[accountCacheKey(accountId, channelId)] = channelMsgs.filter((m) => m.id !== messageId);
           }
         });
       } catch (e) {
@@ -748,7 +926,7 @@ export const useDiscordStore = create<DiscordStore>()(
         fileHandle,
         fileData
       );
-      get().prependMessage(channelId, message);
+      get().prependMessage(accountId, channelId, message);
     },
 
     sendVoiceMessage: async (accountId, channelId, audioData, durationSecs, waveform, replyTo) => {
@@ -760,29 +938,36 @@ export const useDiscordStore = create<DiscordStore>()(
       const message = await api.sendVoiceMessage(
         accountId,
         channelId,
-        Array.from(audioData),
+        audioData,
         durationSecs,
         waveform,
         replyTo
       );
-      get().prependMessage(channelId, message);
+      get().prependMessage(accountId, channelId, message);
     },
 
     addReaction: async (accountId, channelId, messageId, emoji) => {
+      const mutationKey = reactionMessageKey(accountId, channelId, messageId);
+      const reactionEmoji = normalizeReactionEmoji({ id: null, name: emoji });
+      if (reactionEmoji.id) {
+        const knownEmoji = Object.values(get().cache.guildEmojis[accountId] ?? {}).flat().find((item) => item.id === reactionEmoji.id);
+        if (knownEmoji) reactionEmoji.animated = knownEmoji.animated;
+      }
       // Client-side guard against reaction spam
       const rateError = checkReactionLimit(messageId);
       if (rateError) {
         console.warn("[rate-limit] addReaction blocked:", rateError);
-        return;
+        throw new Error(rateError);
       }
+      beginReactionMutation(mutationKey);
       // Optimistic update
       set((s) => {
-        const msgs = s.cache.messages[channelId];
+        const msgs = s.cache.messages[accountCacheKey(accountId, channelId)];
         if (msgs) {
           const msg = msgs.find(m => m.id === messageId);
           if (msg) {
             if (!msg.reactions) msg.reactions = [];
-            const r = msg.reactions.find(x => x.emoji.name === emoji);
+            const r = msg.reactions.find(x => sameReactionEmoji(x.emoji, reactionEmoji));
             if (r) {
               if (!r.me) {
                 r.count++;
@@ -792,7 +977,7 @@ export const useDiscordStore = create<DiscordStore>()(
               msg.reactions.push({
                 count: 1,
                 me: true,
-                emoji: { id: null, name: emoji }
+                emoji: reactionEmoji
               });
             }
           }
@@ -802,18 +987,24 @@ export const useDiscordStore = create<DiscordStore>()(
         await api.addReaction(accountId, channelId, messageId, emoji);
       } catch (e) {
         console.error(e);
-        get().applyGatewayReaction(channelId, messageId, { id: null, name: emoji }, false, true);
+        get().applyGatewayReaction(accountId, channelId, messageId, reactionEmoji, false, true);
+        throw e;
+      } finally {
+        endReactionMutation(mutationKey);
       }
     },
 
     removeReaction: async (accountId, channelId, messageId, emoji) => {
+      const mutationKey = reactionMessageKey(accountId, channelId, messageId);
+      const reactionEmoji = normalizeReactionEmoji({ id: null, name: emoji });
+      beginReactionMutation(mutationKey);
       // Optimistic update
       set((s) => {
-        const msgs = s.cache.messages[channelId];
+        const msgs = s.cache.messages[accountCacheKey(accountId, channelId)];
         if (msgs) {
           const msg = msgs.find(m => m.id === messageId);
           if (msg && msg.reactions) {
-            const rIndex = msg.reactions.findIndex(x => x.emoji.name === emoji);
+            const rIndex = msg.reactions.findIndex(x => sameReactionEmoji(x.emoji, reactionEmoji));
             if (rIndex !== -1) {
               const r = msg.reactions[rIndex];
               if (r.me) {
@@ -831,30 +1022,21 @@ export const useDiscordStore = create<DiscordStore>()(
         await api.removeReaction(accountId, channelId, messageId, emoji);
       } catch (e) {
         console.error(e);
-        get().applyGatewayReaction(channelId, messageId, { id: null, name: emoji }, true, true);
+        get().applyGatewayReaction(accountId, channelId, messageId, reactionEmoji, true, true);
+        throw e;
+      } finally {
+        endReactionMutation(mutationKey);
       }
     },
 
-    prependMessage: (channelId, message) => {
+    prependMessage: (accountId, channelId, message) => {
+      const key = accountCacheKey(accountId, channelId);
+      // Unopened channels retain unread/notifications, not their entire history.
+      if (!get().cache.messages[key] && get().activeMessageKey !== key) return;
       set((s) => {
-        const msgs = s.cache.messages[channelId];
-        if (msgs) {
-          const fingerprint = `${message.author.id}:${message.content.trim()}`;
-          const existingIndex = msgs.findIndex(
-            (m) => m.id === message.id || (m.id.startsWith("local-") && `${m.author.id}:${m.content.trim()}` === fingerprint)
-          );
-          
-          if (existingIndex !== -1) {
-            const existing = msgs[existingIndex];
-            if (existing.id.startsWith("local-") && !message.id.startsWith("local-")) {
-              msgs[existingIndex] = message;
-            }
-          } else {
-            msgs.unshift(message);
-          }
-        } else {
-          s.cache.messages[channelId] = [message];
-        }
+        s.cache.messages[key] = mergeMessages(s.cache.messages[key] ?? [], [message]);
+        s.messagePages[key] ??= { lastAccess: Date.now(), hasMore: true, historyExpanded: false };
+        pruneDiscordMessageCache(s);
       });
     },
 
@@ -868,10 +1050,9 @@ export const useDiscordStore = create<DiscordStore>()(
           id: e.id || e.name || Math.random().toString(),
         })) as DiscordEmoji[];
         
-        try {
-          localStorage.setItem(`guildEmojis-${accountId}`, JSON.stringify(s.cache.guildEmojis[accountId]));
-        } catch (e) {}
+
       });
+      scheduleEmojiPersistence(accountId, () => get().cache.guildEmojis[accountId]);
     },
 
     addGuildRoles: (accountId, guildId, roles) => {
@@ -882,39 +1063,43 @@ export const useDiscordStore = create<DiscordStore>()(
       });
     },
 
-    updateMessageFromGateway: (channelId, message) => {
+    updateMessageFromGateway: (accountId, channelId, message) => {
       set((s) => {
-        const existing = s.cache.messages[channelId]?.find((item) => item.id === message.id);
+        const existing = s.cache.messages[accountCacheKey(accountId, channelId)]?.find((item) => item.id === message.id);
         if (existing) Object.assign(existing, message);
       });
     },
 
-    removeMessageFromGateway: (channelId, messageId) => {
+    removeMessageFromGateway: (accountId, channelId, messageId) => {
       set((s) => {
-        const messages = s.cache.messages[channelId];
+        const messages = s.cache.messages[accountCacheKey(accountId, channelId)];
         if (messages) {
-          s.cache.messages[channelId] = messages.filter((message) => message.id !== messageId);
+          s.cache.messages[accountCacheKey(accountId, channelId)] = messages.filter((message) => message.id !== messageId);
         }
       });
     },
 
-    applyGatewayReaction: (channelId, messageId, emoji, added, isCurrentUser) => {
+    applyGatewayReaction: (accountId, channelId, messageId, emoji, added, isCurrentUser) => {
+      const reactionEmoji = normalizeReactionEmoji(emoji);
+      markReactionChanged(reactionMessageKey(accountId, channelId, messageId));
       set((s) => {
-        const message = s.cache.messages[channelId]?.find((item) => item.id === messageId);
+        const message = s.cache.messages[accountCacheKey(accountId, channelId)]?.find((item) => item.id === messageId);
         if (!message) return;
         if (!message.reactions) message.reactions = [];
 
         const index = message.reactions.findIndex(
-          (reaction) => reaction.emoji.id === emoji.id && reaction.emoji.name === emoji.name
+          (reaction) => sameReactionEmoji(reaction.emoji, reactionEmoji)
         );
         if (added) {
           if (index >= 0) {
+            if (reactionEmoji.animated !== undefined) message.reactions[index].emoji.animated = reactionEmoji.animated;
+            if (reactionEmoji.name) message.reactions[index].emoji.name = reactionEmoji.name;
             if (!isCurrentUser || !message.reactions[index].me) {
               message.reactions[index].count += 1;
             }
             if (isCurrentUser) message.reactions[index].me = true;
           } else {
-            message.reactions.push({ count: 1, me: isCurrentUser, emoji });
+            message.reactions.push({ count: 1, me: isCurrentUser, emoji: reactionEmoji });
           }
         } else if (index >= 0) {
           if (!isCurrentUser || message.reactions[index].me) {
@@ -1002,34 +1187,45 @@ export const useDiscordStore = create<DiscordStore>()(
       }
     },
 
-    addTypingUser: (channelId, userId, timestamp, member) => {
+    addTypingUser: (accountId, channelId, userId, timestamp, member) => {
+      if (!Number.isFinite(timestamp) || timestamp <= 0 || !channelId || !userId) return;
       set((s) => {
-        if (!s.cache.typingUsers[channelId]) {
-          s.cache.typingUsers[channelId] = [];
+        const key = accountCacheKey(accountId, channelId);
+        const now = Date.now();
+        for (const typingKey of Object.keys(s.cache.typingUsers)) {
+          const activeUsers = s.cache.typingUsers[typingKey].filter((user) => now - user.timestamp < 10_000);
+          if (activeUsers.length) s.cache.typingUsers[typingKey] = activeUsers;
+          else delete s.cache.typingUsers[typingKey];
         }
-        
-        const existing = s.cache.typingUsers[channelId].find(u => u.userId === userId);
+        if (!s.cache.typingUsers[key]) s.cache.typingUsers[key] = [];
+
+        const existing = s.cache.typingUsers[key].find((user) => user.userId === userId);
         if (existing) {
           existing.timestamp = timestamp;
           if (member) existing.member = member;
         } else {
-          s.cache.typingUsers[channelId].push({ userId, timestamp, member });
+          s.cache.typingUsers[key].push({ userId, timestamp, member });
         }
 
-        // Limpa usuários que não digitam há mais de 10 segundos
-        const now = Date.now();
-        s.cache.typingUsers[channelId] = s.cache.typingUsers[channelId].filter(
-          (u) => now - u.timestamp < 10000
-        );
+        // Typing events are transient; bound each channel even for large group DMs.
+        if (s.cache.typingUsers[key].length > 50) s.cache.typingUsers[key].splice(0, s.cache.typingUsers[key].length - 50);
       });
     },
 
     clearCache: (accountId) => {
+      accountEpochs.set(accountId, epochFor(accountId) + 1);
+      for (const key of messageRequests.keys()) if (key.startsWith(`${accountId}:`)) messageRequests.delete(key);
+      clearEmojiPersistence(accountId);
       set((s) => {
-        delete s.cache.guilds[accountId];
-        delete s.cache.channels[accountId];
-        delete s.cache.dms[accountId];
-        delete s.channelLoads[accountId];
+        for (const collection of [s.cache.guilds, s.cache.channels, s.cache.dms, s.cache.guildEmojis,
+          s.cache.guildRoles, s.cache.guildMembers, s.cache.relationships, s.cache.presences,
+          s.cache.session_ids, s.cache.unreads, s.channelLoads, s.loading.guilds]) delete collection[accountId];
+        for (const collection of [s.cache.messages, s.cache.threads, s.cache.pinnedMessages,
+          s.cache.typingUsers, s.messagePages, s.loading.messages, s.loading.threads]) {
+          for (const key of Object.keys(collection)) if (key.startsWith(`${accountId}:`)) delete collection[key];
+        }
+        if (s.activeMessageKey?.startsWith(`${accountId}:`)) s.activeMessageKey = null;
+        for (const key of Object.keys(s.errors)) if (key.includes(accountId)) delete s.errors[key];
       });
     },
   }))

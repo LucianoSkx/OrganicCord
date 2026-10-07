@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import React, { useState, useEffect } from "react";
 import { useAccountStore } from "@/stores/accountStore";
 import { useNavigationStore } from "@/stores/navigationStore";
@@ -5,12 +6,13 @@ import { getAuthSessions, revokeAuthSession, fetchUserProfile, updateUserProfile
 import type { DiscordAuthSession, DiscordUserProfile } from "@/types";
 import { Avatar } from "@/components/ui/Avatar";
 import { ProfileCustomizationModal } from "@/components/profile/ProfileCustomizationModal";
+import { MessageContent } from "@/components/chat/MessageContent";
 import { getBannerUrl } from "@/lib/utils";
-import { Monitor, Smartphone, Loader2, X, Upload, Trash2, Check, AlertCircle, Sparkles, Zap } from "lucide-react";
+import { Monitor, Smartphone, Loader2, X, Upload, Trash2, Check, AlertCircle, Sparkles, Zap, Pencil } from "lucide-react";
 
 export function MyAccountSettings() {
-  const { accounts, logoutAccount, updateAccountInfo } = useAccountStore();
-  const { activeAccountId } = useNavigationStore();
+  const { accounts, logoutAccount, updateAccountInfo } = useAccountStore(useShallow((s) => ({ accounts: s.accounts, logoutAccount: s.logoutAccount, updateAccountInfo: s.updateAccountInfo })));
+  const { activeAccountId } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId })));
   
   const [sessions, setSessions] = useState<DiscordAuthSession[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
@@ -291,31 +293,17 @@ export function MyAccountSettings() {
             </div>
             {userBio && (
               <div style={{ fontSize: 13, color: "var(--text-normal)", marginTop: 8, maxWidth: 450, background: "var(--bg-tertiary)", padding: "8px 12px", borderRadius: "var(--radius-sm)", borderLeft: "3px solid var(--brand-500)" }}>
-                {userBio}
+                <MessageContent content={userBio} embed />
               </div>
             )}
           </div>
           
           <button 
             onClick={openEditModal}
-            style={{
-              background: "var(--brand-500)",
-              color: "#fff",
-              border: "none",
-              borderRadius: "var(--radius-sm)",
-              padding: "8px 16px",
-              fontWeight: 600,
-              cursor: "pointer",
-              marginTop: 8,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              transition: "filter 0.2s"
-            }}
-            className="hover-opacity"
+            className="account-edit-profile-button"
           >
-            <Sparkles size={16} />
-            Editar Perfil de Usuário
+            <Pencil size={15} aria-hidden="true" />
+            Editar perfil
           </button>
         </div>
         
@@ -357,7 +345,7 @@ export function MyAccountSettings() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 4 }}>Sobre Mim</div>
-                  <div style={{ fontSize: 14, color: "var(--text-normal)", whiteSpace: "pre-wrap" }}>{userBio}</div>
+                  <div style={{ fontSize: 14, color: "var(--text-normal)", whiteSpace: "pre-wrap" }}><MessageContent content={userBio} embed /></div>
                 </div>
                 <button 
                   onClick={openEditModal}

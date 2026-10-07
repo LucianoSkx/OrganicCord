@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import React, { useState } from "react";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { useProfileStore } from "@/stores/profileStore";
@@ -35,8 +36,8 @@ interface Props {
 
 export function UserContextMenu({ children, userId, guildId, channelId }: Props) {
   const { openProfile } = useProfileStore();
-  const { activeAccountId, setActiveChannel } = useNavigationStore();
-  const { cache, closeDM, sendMessage, blockUser, unblockUser } = useDiscordStore();
+  const { activeAccountId, setActiveChannel } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, setActiveChannel: s.setActiveChannel })));
+  const { cache, closeDM, sendMessage, blockUser, unblockUser } = useDiscordStore(useShallow((s) => ({ cache: s.cache, closeDM: s.closeDM, sendMessage: s.sendMessage, blockUser: s.blockUser, unblockUser: s.unblockUser })));
   const { isUserMuted, muteUser, unmuteUser, isUserMutedInGuild, muteUserInGuild, unmuteUserInGuild } = useNotificationStore();
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
   const [noteValue, setNoteValue] = useState("");

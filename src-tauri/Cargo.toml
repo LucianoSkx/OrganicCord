@@ -1,6 +1,6 @@
 [package]
 name = "organic-cord"
-version = "0.2.0-beta.1"
+version = "0.3.0-beta.1"
 description = "OrganicCord - Multi-account Discord client"
 authors = ["OrganicCord"]
 license = "MIT"
@@ -66,6 +66,7 @@ webrtc-media = "0.11"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = ["Win32_Media_Audio", "Win32_System_Com"] }
 webview2-com = "0.38.2"
+windows-core = "0.61"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

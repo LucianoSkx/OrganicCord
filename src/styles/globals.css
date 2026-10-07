@@ -543,3 +543,9 @@ button:not(:disabled):active,
   @keyframes hubPulse   { from { opacity: 1; } to { opacity: 1; } }
   @keyframes hubTabIn   { from { opacity: 0; } to { opacity: 1; } }
 }
+.account-edit-profile-button { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; margin-top: 8px; padding: 9px 13px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-secondary); color: var(--text-normal); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; transition: background 160ms ease, border-color 160ms ease; }
+.account-edit-profile-button:hover { background: var(--bg-modifier-hover); border-color: var(--brand-500); }
+.account-edit-profile-button:focus-visible { outline: 2px solid var(--brand-500); outline-offset: 2px; }
+.message-row-compact .message-compact-content { display: inline; }
+.message-row-compact .message-compact-heading { vertical-align: baseline; }
+.profile-customization-preview-bio { margin-top: 7px; font-size: 12px; line-height: 1.4; white-space: pre-wrap; }

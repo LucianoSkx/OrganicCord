@@ -3841,7 +3841,7 @@ dependencies = [
 
 [[package]]
 name = "organic-cord"
-version = "0.2.0-beta.1"
+version = "0.3.0-beta.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3887,6 +3887,7 @@ dependencies = [
  "webrtc-media",
  "webview2-com",
  "windows 0.62.2",
+ "windows-core 0.61.2",
  "zeroize",
 ]
 

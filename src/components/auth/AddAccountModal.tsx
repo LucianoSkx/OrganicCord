@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useState, useRef, useEffect } from "react";
 import { useAccountStore } from "@/stores/accountStore";
 import type { StoredAccount } from "@/types";
@@ -29,7 +30,7 @@ export function AddAccountModal({ onClose, onSuccess }: Props) {
   const [showToken, setShowToken] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-  const { addAccount, acceptAccount } = useAccountStore();
+  const { addAccount, acceptAccount } = useAccountStore(useShallow((s) => ({ addAccount: s.addAccount, acceptAccount: s.acceptAccount })));
 
   useEffect(() => {
     if (step === "token") {

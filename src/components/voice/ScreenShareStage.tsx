@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { LoaderCircle, MonitorUp, Square, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { useAccountStore } from "@/stores/accountStore";
@@ -31,7 +32,7 @@ export function ScreenShareStage({ recipient, allowClose = false }: Props) {
     isScreenSharing,
     stopScreenShare,
     setScreenShareViewOpen,
-  } = useVoiceStore();
+  } = useVoiceStore(useShallow((s) => ({ accountId: s.accountId, speakingUsers: s.speakingUsers, voiceParticipants: s.voiceParticipants, screenShareStatus: s.screenShareStatus, screenShareStage: s.screenShareStage, screenShareError: s.screenShareError, screenSharePreviewUrl: s.screenSharePreviewUrl, isScreenSharing: s.isScreenSharing, stopScreenShare: s.stopScreenShare, setScreenShareViewOpen: s.setScreenShareViewOpen })));
   const account = useAccountStore((state) => state.accounts.find((item) => item.id === accountId));
   const cache = useDiscordStore((state) => state.cache);
 

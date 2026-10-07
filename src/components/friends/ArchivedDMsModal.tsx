@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import React from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X, ArchiveRestore } from "lucide-react";
@@ -16,8 +17,8 @@ interface Props {
 export function ArchivedDMsModal({ isOpen, onClose, accountId }: Props) {
   const archivedDMsIds = useArchiveStore(state => state.archivedDMs[accountId] || []);
   const unarchiveDM = useArchiveStore(state => state.unarchiveDM);
-  const { cache } = useDiscordStore();
-  const { setActiveChannel } = useNavigationStore();
+  const { cache } = useDiscordStore(useShallow((s) => ({ cache: s.cache })));
+  const { setActiveChannel } = useNavigationStore(useShallow((s) => ({ setActiveChannel: s.setActiveChannel })));
 
   const allDMs = cache.dms[accountId] || [];
   const archivedDMs = allDMs.filter(dm => archivedDMsIds.includes(dm.id));

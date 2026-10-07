@@ -145,21 +145,11 @@ export const deleteMessage = (
 ) => invoke<void>("delete_message", { accountId, channelId, messageId });
 
 export const sendVoiceMessage = (
-  accountId: string,
-  channelId: string,
-  audioData: number[],
-  durationSecs: number,
-  waveform: string,
-  replyTo?: string
-) =>
-  invoke<DiscordMessage>("send_voice_message", {
-    accountId,
-    channelId,
-    audioData,
-    durationSecs,
-    waveform,
-    replyTo: replyTo ?? null,
-  });
+  accountId: string, channelId: string, audioData: Uint8Array,
+  durationSecs: number, waveform: string, replyTo?: string,
+) => invoke<DiscordMessage>("send_voice_bytes", audioData, { headers: {
+  "x-organic-metadata": encodeURIComponent(JSON.stringify({ accountId, channelId, durationSecs, waveform, replyTo: replyTo ?? null })),
+} });
 
 export const sendInteraction = (
   accountId: string,
@@ -205,15 +195,13 @@ export const sendMessageWithAttachment = (
   fileName: string,
   fileHandle?: string,
   fileData?: Uint8Array
-) => invoke<DiscordMessage>("send_message_with_attachment", {
-  accountId,
-  channelId,
-  content,
-  replyTo,
-  fileName,
-  fileHandle: fileHandle ?? null,
-  fileData: fileData ? Array.from(fileData) : null
-});
+) => fileData
+  ? invoke<DiscordMessage>("send_attachment_bytes", fileData, { headers: {
+      "x-organic-metadata": encodeURIComponent(JSON.stringify({ accountId, channelId, content, replyTo: replyTo ?? null, fileName })),
+    } })
+  : invoke<DiscordMessage>("send_message_with_attachment", {
+      accountId, channelId, content, replyTo, fileName, fileHandle: fileHandle ?? null, fileData: null,
+    });
 
 export interface SelectedAttachment {
   handle: string;
@@ -345,6 +333,7 @@ export interface RegisteredGame {
 
 export interface GameDetectionSettings {
   enabled: boolean;
+  publishEnabled: boolean;
   games: RegisteredGame[];
 }
 
@@ -361,6 +350,9 @@ export const gameDetectionGetSettings = () =>
 
 export const gameDetectionSetEnabled = (enabled: boolean) =>
   invoke<GameDetectionSettings>("game_detection_set_enabled", { enabled });
+
+export const gameDetectionSetPublishEnabled = (enabled: boolean) =>
+  invoke<GameDetectionSettings>("game_detection_set_publish_enabled", { enabled });
 
 export const gameDetectionUpdateGame = (game: RegisteredGame) =>
   invoke<GameDetectionSettings>("game_detection_update_game", { game });

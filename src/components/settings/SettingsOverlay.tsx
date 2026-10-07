@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import React, { useState, useEffect } from "react";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { X } from "lucide-react";
@@ -13,7 +14,7 @@ import { AboutCreditsSettings } from "./tabs/AboutCreditsSettings";
 type SettingsTab = "account" | "voice" | "appearance" | "privacy" | "notifications" | "keybinds" | "registered-games" | "about";
 
 export function SettingsOverlay() {
-  const { isSettingsOpen, closeSettings } = useNavigationStore();
+  const { isSettingsOpen, closeSettings } = useNavigationStore(useShallow((s) => ({ isSettingsOpen: s.isSettingsOpen, closeSettings: s.closeSettings })));
   const [activeTab, setActiveTab] = useState<SettingsTab>("account");
 
   useEffect(() => {

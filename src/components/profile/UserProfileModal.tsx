@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import React, { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useProfileStore } from "@/stores/profileStore";
@@ -36,7 +37,7 @@ export function UserProfileModal() {
     return undefined;
   };
 
-  const { cache } = useDiscordStore();
+  const { cache } = useDiscordStore(useShallow((s) => ({ cache: s.cache })));
   const myGuilds = activeAccountId ? cache.guilds[activeAccountId] || [] : [];
 
   useEffect(() => {

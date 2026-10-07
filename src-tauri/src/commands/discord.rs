@@ -726,6 +726,55 @@ fn validate_attachment_name(name: &str) -> Result<String, String> {
     Ok(name.to_string())
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BinaryMessageMetadata {
+    account_id: String,
+    channel_id: String,
+    content: Option<String>,
+    reply_to: Option<String>,
+    file_name: Option<String>,
+    duration_secs: Option<f64>,
+    waveform: Option<String>,
+}
+
+fn binary_message(request: &tauri::ipc::Request<'_>) -> Result<(BinaryMessageMetadata, Vec<u8>), String> {
+    let header = request.headers().get("x-organic-metadata")
+        .and_then(|value| value.to_str().ok()).filter(|value| value.len() <= 32_768)
+        .ok_or("Metadados do anexo inválidos")?;
+    let decoded = urlencoding::decode(header).map_err(|_| "Metadados do anexo inválidos")?;
+    let metadata = serde_json::from_str(&decoded).map_err(|_| "Metadados do anexo inválidos")?;
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("O anexo deve usar transporte binário".into());
+    };
+    if bytes.is_empty() || bytes.len() as u64 > MAX_ATTACHMENT_BYTES {
+        return Err("O anexo deve ter entre 1 byte e 25 MB.".into());
+    }
+    Ok((metadata, bytes.clone()))
+}
+
+#[tauri::command]
+pub async fn send_attachment_bytes(
+    request: tauri::ipc::Request<'_>, attachments: State<'_, AttachmentRegistry>,
+    rl: State<'_, RateLimiter>, app: tauri::AppHandle,
+) -> Result<DiscordMessage, String> {
+    let (metadata, bytes) = binary_message(&request)?;
+    send_message_with_attachment(metadata.account_id, metadata.channel_id,
+        metadata.content.unwrap_or_default(), metadata.reply_to,
+        metadata.file_name.ok_or("Nome do arquivo ausente")?, None, Some(bytes), attachments, rl, app).await
+}
+
+#[tauri::command]
+pub async fn send_voice_bytes(
+    request: tauri::ipc::Request<'_>, rl: State<'_, RateLimiter>, app: tauri::AppHandle,
+) -> Result<DiscordMessage, String> {
+    let (metadata, bytes) = binary_message(&request)?;
+    let duration = metadata.duration_secs.filter(|value| value.is_finite() && *value >= 0.0)
+        .ok_or("Duração da gravação inválida")?;
+    send_voice_message(metadata.account_id, metadata.channel_id, bytes, duration,
+        metadata.waveform.unwrap_or_default(), metadata.reply_to, rl, app).await
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn send_voice_message(
@@ -909,7 +958,7 @@ pub async fn get_gateway_presences(
         .lock()
         .map_err(|_| "O cache de presenças está indisponível.".to_string())?;
     if let Some(list) = cache.get(&account_id) {
-        Ok(list.clone())
+        Ok(list.values().cloned().collect())
     } else {
         Ok(vec![])
     }
@@ -1176,7 +1225,7 @@ pub async fn discord_remove_reaction(
 
 /// POST multipart form with exponential backoff on transient errors.
 async fn retry_post_multipart<T>(
-    client: &reqwest::Client,
+    client: &crate::http_client::DiscordClient,
     url: &str,
     form: reqwest::multipart::Form,
     rl: &RateLimiter,

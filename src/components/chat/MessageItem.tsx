@@ -1,10 +1,14 @@
-import { lazy, Suspense, useState, useRef } from "react";
+import { useMessageAudioStore } from "@/stores/messageAudioStore";
+import { memo } from "react";
+import { useShallow } from "zustand/react/shallow";
+import { lazy, Suspense, useState } from "react";
 import type { DiscordMessage, DiscordChannel } from "@/types";
 import { Avatar } from "@/components/ui/Avatar";
 import { formatTimestamp, getDisplayName } from "@/lib/utils";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { useDiscordStore } from "@/stores/discordStore";
 import { MessageContent } from "./MessageContent";
+import { MediaPreview } from "./MediaPreview";
 import { EmbedRenderer } from "./EmbedRenderer";
 import { PollRenderer } from "./PollRenderer";
 import { MessageComponentsRenderer } from "./MessageComponentsRenderer";
@@ -17,6 +21,9 @@ import * as Tooltip from "@radix-ui/react-tooltip";
 import { OrganicMark } from "@/components/ui/OrganicMark";
 import { UserProfilePopover } from "@/components/profile/UserProfilePopover";
 import { DiscordEmojiPicker } from "./DiscordEmojiPicker";
+import { toast } from "@/components/ui/Toast";
+import { useSettingsStore } from "@/stores/settingsStore";
+import { emojiCatalog, normalizeReactionEmoji, reactionIdentifier, parseCustomEmojiToken } from "@/lib/emoji";
 
 const EmojiPickerPanel = lazy(() =>
   import("./EmojiPickerPanel").then((module) => ({ default: module.EmojiPickerPanel })),
@@ -31,25 +38,20 @@ interface Props {
   channels?: DiscordChannel[];
 }
 
-export function MessageItem({ message, isGrouped, isOwn, onReply, onDelete, channels = [] }: Props) {
+export const MessageItem = memo(function MessageItem({ message, isGrouped, isOwn, onReply, onDelete, channels = [] }: Props) {
+  const { displayMode, fontSize, messageSpacing } = useSettingsStore((s) => s.settings);
+  const compact = displayMode === "compact";
   const [hovered, setHovered] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(message.content || "");
-  const { activeAccountId, activeChannelId } = useNavigationStore();
-  const { addReaction, removeReaction, pinMessage, unpinMessage, editMessage } = useDiscordStore();
+  const { activeAccountId, activeChannelId } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, activeChannelId: s.activeChannelId })));
+  const { addReaction, removeReaction, pinMessage, unpinMessage, editMessage } = useDiscordStore(useShallow((s) => ({ addReaction: s.addReaction, removeReaction: s.removeReaction, pinMessage: s.pinMessage, unpinMessage: s.unpinMessage, editMessage: s.editMessage })));
   
   const guildEmojisRaw = useDiscordStore((s) => activeAccountId ? s.cache.guildEmojis[activeAccountId] : null);
 
-  const customEmojis = useMemo(() => {
-    if (!guildEmojisRaw) return [];
-    return Object.values(guildEmojisRaw).flat().map(e => ({
-      id: e.id || Math.random().toString(),
-      names: e.name ? [e.name] : [],
-      imgUrl: `https://cdn.discordapp.com/emojis/${e.id}.${e.animated ? "gif" : "webp"}?size=48`
-    }));
-  }, [guildEmojisRaw]);
+  const customEmojis = emojiCatalog(guildEmojisRaw);
 
   const author = message.author;
   const displayName = getDisplayName(author);
@@ -61,7 +63,11 @@ export function MessageItem({ message, isGrouped, isOwn, onReply, onDelete, chan
       emojiStr = `${emojiName}:${emojiData.unified}`;
     }
     if (activeAccountId && activeChannelId) {
-      await addReaction(activeAccountId, activeChannelId, message.id, emojiStr);
+      try {
+        await addReaction(activeAccountId, activeChannelId, message.id, emojiStr);
+      } catch (error) {
+        toast.error(`Não foi possível adicionar a reação: ${String(error).replace(/^Error:\s*/, "")}`);
+      }
     }
     setReactionPickerOpen(false);
   };
@@ -69,9 +75,17 @@ export function MessageItem({ message, isGrouped, isOwn, onReply, onDelete, chan
   const handleToggleReaction = async (emoji: string, me: boolean) => {
     if (activeAccountId && activeChannelId) {
       if (me) {
-        await removeReaction(activeAccountId, activeChannelId, message.id, emoji);
+        try {
+          await removeReaction(activeAccountId, activeChannelId, message.id, emoji);
+        } catch (error) {
+          toast.error(`Não foi possível remover a reação: ${String(error).replace(/^Error:\s*/, "")}`);
+        }
       } else {
-        await addReaction(activeAccountId, activeChannelId, message.id, emoji);
+        try {
+          await addReaction(activeAccountId, activeChannelId, message.id, emoji);
+        } catch (error) {
+          toast.error(`Não foi possível adicionar a reação: ${String(error).replace(/^Error:\s*/, "")}`);
+        }
       }
     }
   };
@@ -92,6 +106,7 @@ export function MessageItem({ message, isGrouped, isOwn, onReply, onDelete, chan
 
   return (
     <div
+      className={compact ? "message-row message-row-compact" : "message-row"}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onContextMenu={(e) => {
@@ -100,15 +115,15 @@ export function MessageItem({ message, isGrouped, isOwn, onReply, onDelete, chan
       }}
       style={{
         display: "flex",
-        padding: isGrouped && !isSystemMessage ? "1px 16px 1px 72px" : "8px 16px",
-        gap: 16,
+        padding: compact ? `${isGrouped ? 1 : 3}px 16px` : isGrouped && !isSystemMessage ? "1px 16px 1px 72px" : `${Math.round(messageSpacing / 2)}px 16px`,
+        gap: compact ? 6 : 16,
         position: "relative",
         background: hovered ? "var(--bg-message-hover)" : "transparent",
         transition: "background 80ms",
       }}
     >
       {/* Avatar ou timestamp (para mensagens agrupadas) */}
-      {isGrouped && !isSystemMessage ? (
+      {compact && !isSystemMessage ? null : isGrouped && !isSystemMessage ? (
         hovered && (
           <div
             className="selectable"
@@ -158,14 +173,16 @@ export function MessageItem({ message, isGrouped, isOwn, onReply, onDelete, chan
       )}
 
       {/* Conteúdo da mensagem */}
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", justifyContent: "center" }}>
-        {!isGrouped && !isSystemMessage && (
+      <div style={{ flex: 1, minWidth: 0, display: compact ? "block" : "flex", flexDirection: compact ? undefined : "column", justifyContent: "center" }}>
+        {(!isGrouped || compact) && !isSystemMessage && (
           <div
+            className={compact ? "message-compact-heading" : undefined}
             style={{
-              display: "flex",
+              display: compact ? "inline-flex" : "flex",
               alignItems: "baseline",
               gap: 8,
-              marginBottom: 2,
+              marginBottom: compact ? 0 : 2,
+              marginRight: compact ? 10 : 0,
             }}
           >
             <UserProfilePopover userId={author.id}>
@@ -175,7 +192,7 @@ export function MessageItem({ message, isGrouped, isOwn, onReply, onDelete, chan
                   style={{
                     fontWeight: 500,
                     color: isOwn ? "var(--brand-500)" : "var(--text-normal)",
-                    fontSize: 15,
+                    fontSize: compact ? Math.max(12, fontSize - 1) : 15,
                     cursor: "pointer",
                     transition: "text-decoration 120ms",
                   }}
@@ -212,9 +229,9 @@ export function MessageItem({ message, isGrouped, isOwn, onReply, onDelete, chan
 
         {/* Conteúdo de texto */}
         <div
-          className="selectable"
+          className={compact ? "selectable message-compact-content" : "selectable"}
           style={{
-            fontSize: 15,
+            fontSize,
             color: message.content ? "var(--text-normal)" : "var(--text-muted)",
             lineHeight: 1.375,
             wordBreak: "break-word",
@@ -407,12 +424,12 @@ export function MessageItem({ message, isGrouped, isOwn, onReply, onDelete, chan
               <DiscordEmojiPicker 
                 accountId={activeAccountId}
                 onSelect={(emojiStr) => {
-                  const match = emojiStr.match(/<a?:.+:(\d+)>/);
-                  if (match) {
-                    const id = match[1];
-                    const name = emojiStr.split(":")[1];
+                  const selected = parseCustomEmojiToken(emojiStr);
+                  if (selected) {
                     if (activeAccountId && activeChannelId) {
-                      addReaction(activeAccountId, activeChannelId, message.id, `${name}:${id}`);
+                      addReaction(activeAccountId, activeChannelId, message.id, `${selected.name}:${selected.id}`).catch((error) => {
+                        toast.error(`Não foi possível adicionar a reação: ${String(error).replace(/^Error:\s*/, "")}`);
+                      });
                     }
                   }
                 }}
@@ -484,7 +501,7 @@ export function MessageItem({ message, isGrouped, isOwn, onReply, onDelete, chan
       )}
     </div>
   );
-}
+});
 
 function ReplyPreview({ message, channels }: { message: DiscordMessage; channels: DiscordChannel[] }) {
   return (
@@ -568,40 +585,19 @@ function formatVoiceTime(seconds: number): string {
 }
 
 function VoiceMessagePlayer({ attachment }: { attachment: import("@/types").Attachment }) {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(attachment.duration_secs || 0);
-  const [playbackRate, setPlaybackRate] = useState<number>(1);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
+  const accountId = useNavigationStore((s) => s.activeAccountId);
+  const { playing: isPlaying, currentTime, duration, playbackRate } = useMessageAudioStore(useShallow((s) => ({
+    playing: s.id === attachment.id && s.accountId === accountId && s.playing,
+    currentTime: s.id === attachment.id && s.accountId === accountId ? s.currentTime : 0,
+    duration: s.id === attachment.id && s.accountId === accountId ? s.duration : attachment.duration_secs ?? 0,
+    playbackRate: s.playbackRate,
+  })));
   const samples = useMemo(() => decodeWaveform(attachment.waveform), [attachment.waveform]);
-
-  const togglePlay = () => {
-    if (!audioRef.current) return;
-    if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
-    } else {
-      audioRef.current.play().catch(console.error);
-      setIsPlaying(true);
-    }
-  };
-
+  const togglePlay = () => { void useMessageAudioStore.getState().toggle(attachment, accountId).catch(console.error); };
   const handleSeek = (index: number) => {
-    if (!audioRef.current || samples.length === 0) return;
-    const totalSecs = duration || audioRef.current.duration || 1;
-    const newTime = (index / samples.length) * totalSecs;
-    audioRef.current.currentTime = newTime;
-    setCurrentTime(newTime);
+    if (samples.length) useMessageAudioStore.getState().seek(attachment, accountId, index / samples.length * (duration || 1));
   };
-
-  const cycleSpeed = () => {
-    const nextSpeed = playbackRate === 1 ? 1.5 : playbackRate === 1.5 ? 2 : 1;
-    setPlaybackRate(nextSpeed);
-    if (audioRef.current) {
-      audioRef.current.playbackRate = nextSpeed;
-    }
-  };
+  const cycleSpeed = () => useMessageAudioStore.getState().setRate(playbackRate === 1 ? 1.5 : playbackRate === 1.5 ? 2 : 1);
 
   const currentRatio = duration > 0 ? currentTime / duration : 0;
 
@@ -622,25 +618,9 @@ function VoiceMessagePlayer({ attachment }: { attachment: import("@/types").Atta
         boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
       }}
     >
-      <audio
-        ref={audioRef}
-        src={attachment.url}
-        onTimeUpdate={() => {
-          if (audioRef.current) setCurrentTime(audioRef.current.currentTime);
-        }}
-        onLoadedMetadata={() => {
-          if (audioRef.current) {
-            setDuration(attachment.duration_secs || audioRef.current.duration || 0);
-          }
-        }}
-        onEnded={() => {
-          setIsPlaying(false);
-          setCurrentTime(0);
-        }}
-      />
-
       {/* Play/Pause Button */}
       <button
+        aria-label={isPlaying ? "Pausar mensagem de voz" : "Reproduzir mensagem de voz"}
         onClick={togglePlay}
         style={{
           width: 36,
@@ -724,7 +704,7 @@ function AttachmentList({
   attachments: import("@/types").Attachment[];
   flags?: number;
 }) {
-  const { setFocusedImage } = useNavigationStore();
+  const { setFocusedImage } = useNavigationStore(useShallow((s) => ({ setFocusedImage: s.setFocusedImage })));
 
   return (
     <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 8 }}>
@@ -742,12 +722,17 @@ function AttachmentList({
 
         const isImage = att.content_type?.startsWith("image/");
         return isImage ? (
-          <img
+          <MediaPreview
             key={att.id}
             src={att.url}
+            proxyUrl={att.proxy_url}
+            previewWidth={400} previewHeight={300}
             alt={att.filename}
             style={{
-              maxWidth: 400,
+              aspectRatio: att.width && att.height ? `${att.width} / ${att.height}` : undefined,
+              width: att.width && att.height ? Math.min(400, att.width, 300 * att.width / att.height) : undefined,
+              height: "auto",
+              maxWidth: "min(400px, 100%)",
               maxHeight: 300,
               borderRadius: "var(--radius-sm)",
               border: "1px solid var(--border-subtle)",
@@ -791,12 +776,14 @@ function ReactionList({
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
       {reactions.map((r, i) => {
-        const emojiName = r.emoji.name ?? "emoji";
-        const emojiIdentifier = r.emoji.id ? `${emojiName}:${r.emoji.id}` : emojiName;
+        const emoji = normalizeReactionEmoji(r.emoji);
+        const emojiName = emoji.name ?? "emoji";
+        const emojiIdentifier = reactionIdentifier(emoji);
         return (
-        <div
+        <button type="button"
           key={i}
           onClick={() => onToggle(emojiIdentifier, !!r.me)}
+          aria-label={`${emojiName}: ${r.count} reações${r.me ? ", sua reação" : ""}`}
           style={{
             background: r.me ? "rgba(88,101,242,0.15)" : "var(--bg-secondary)",
             border: `1px solid ${r.me ? "rgba(88,101,242,0.4)" : "var(--border-subtle)"}`,
@@ -809,9 +796,9 @@ function ReactionList({
             cursor: "pointer",
           }}
         >
-          {r.emoji.id ? (
-            <img
-              src={`https://cdn.discordapp.com/emojis/${r.emoji.id}.${r.emoji.animated ? "gif" : "webp"}?size=20`}
+          {emoji.id ? (
+            <img loading="lazy" decoding="async"
+              src={`https://cdn.discordapp.com/emojis/${emoji.id}.${emoji.animated ? "gif" : "webp"}?size=20`}
               alt={emojiName}
               style={{ width: 18, height: 18, verticalAlign: "middle" }}
             />
@@ -821,7 +808,7 @@ function ReactionList({
           <span style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600 }}>
             {r.count}
           </span>
-        </div>
+        </button>
       );})}
     </div>
   );

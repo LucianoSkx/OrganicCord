@@ -1,3 +1,6 @@
+import { useShallow } from "zustand/react/shallow";
+import { useChannelMessages } from "@/hooks/useChannelMessages";
+import { accountCacheKey } from "@/lib/messageCache";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useDiscordStore } from "@/stores/discordStore";
 import { useAccountStore } from "@/stores/accountStore";
@@ -14,7 +17,6 @@ import { ChatDropOverlay } from "./ChatDropOverlay";
 import { getChannelPermissions } from "@/lib/permissions";
 import { toast } from "@/components/ui/Toast";
 import { AppConfirmDialog } from "@/components/ui/AppDialog";
-import { getMessages } from "@/lib/tauri";
 
 function getHeaderIcon(type: ChannelType): React.ReactNode {
   const n = Number(type);
@@ -32,10 +34,10 @@ interface Props {
 }
 
 export function ChatArea({ channelId, accountId }: Props) {
-  const { cache, loading, fetchMessages, fetchMoreMessages, sendMessage, deleteMessage } =
-    useDiscordStore();
-  const { accounts } = useAccountStore();
-  const { activeGuildId } = useNavigationStore();
+  const { fetchMoreMessages, sendMessage, deleteMessage } = useDiscordStore(useShallow((s) => ({ fetchMoreMessages: s.fetchMoreMessages, sendMessage: s.sendMessage, deleteMessage: s.deleteMessage })));
+  const { messages, isLoading } = useChannelMessages(accountId, channelId);
+  const { accounts } = useAccountStore(useShallow((s) => ({ accounts: s.accounts })));
+  const { activeGuildId } = useNavigationStore(useShallow((s) => ({ activeGuildId: s.activeGuildId })));
   const [replyingTo, setReplyingTo] = useState<DiscordMessage | null>(null);
   const [searchQuery, setSearchQuery] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -45,25 +47,23 @@ export function ChatArea({ channelId, accountId }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevChannelRef = useRef<string | null>(null);
 
-  const messages = cache.messages[channelId] ?? [];
-  const isLoading = loading.messages[channelId];
   const account = accounts.find((a) => a.id === accountId);
+  const dms = useDiscordStore((s) => s.cache.dms[accountId]) ?? [];
+  const relationships = useDiscordStore((s) => s.cache.relationships[accountId]);
 
-  const guilds = cache.guilds[accountId] ?? [];
-  const channels = activeGuildId ? (cache.channels[accountId]?.[activeGuildId] ?? []) : [];
+  const guilds = useDiscordStore((s) => s.cache.guilds[accountId]);
+  const channels = useDiscordStore((s) => activeGuildId ? s.cache.channels[accountId]?.[activeGuildId] : undefined) ?? [];
   const channel = channels.find((c) => c.id === channelId);
-  const threads = activeGuildId ? (cache.threads[activeGuildId] ?? []) : [];
+  const threads = useDiscordStore((s) => activeGuildId ? s.cache.threads[accountCacheKey(accountId, activeGuildId)] : undefined) ?? [];
   const isThread = Boolean(!channel && activeGuildId && threads.some((t: DiscordChannel) => t.id === channelId));
   const threadObj = isThread ? threads.find((t: DiscordChannel) => t.id === channelId) : null;
   const targetName = channel?.name || threadObj?.name || "canal";
   const permissionChannel = isThread
     ? channels.find((item) => item.id === threadObj?.parent_id)
     : channel;
-  const currentMember = activeGuildId
-    ? cache.guildMembers[accountId]?.[activeGuildId]
-    : undefined;
+  const currentMember = useDiscordStore((s) => activeGuildId ? s.cache.guildMembers[accountId]?.[activeGuildId] : undefined);
 
-  const perms = getChannelPermissions(activeGuildId, guilds, isThread, {
+  const perms = getChannelPermissions(activeGuildId, guilds ?? [], isThread, {
     channel: permissionChannel,
     memberRoleIds: currentMember?.roles,
     currentUserId: account?.user_id,
@@ -119,59 +119,11 @@ export function ChatArea({ channelId, accountId }: Props) {
     }
   };
 
-  // Carrega mensagens quando o canal muda (sempre busca fresh ao trocar de canal)
   useEffect(() => {
     prevChannelRef.current = channelId;
     setPendingAttachment(null);
-    fetchMessages(accountId, channelId).then(() => {
-      const msgs = useDiscordStore.getState().cache.messages[channelId];
-      const newestReal = msgs?.find(m => !m.id.startsWith("local-"));
-      if (newestReal) {
-        useDiscordStore.getState().clearUnread(accountId, channelId, newestReal.id);
-      } else {
-        useDiscordStore.getState().clearUnread(accountId, channelId);
-      }
-    });
-  }, [channelId, accountId]);
-
-  // Polling: busca só mensagens mais novas que a última do cache (via after=<id>)
-  useEffect(() => {
-    const poll = async () => {
-      const existing = useDiscordStore.getState().cache.messages[channelId];
-      // Find the newest real (non-local) message to use as `after` cursor
-      const newestReal = existing?.find((m) => !m.id.startsWith("local-"));
-      if (!newestReal) return;
-      try {
-        const fresh = await getMessages(accountId, channelId, undefined, newestReal.id);
-        if (fresh.length === 0) return;
-        useDiscordStore.setState((s) => {
-          const cur = s.cache.messages[channelId] ?? [];
-          // Build fingerprint set from real messages (not local fakes)
-          const realIds = new Set(cur.filter((m) => !m.id.startsWith("local-")).map((m) => m.id));
-          const toAdd = fresh.filter((m) => !realIds.has(m.id));
-          if (toAdd.length === 0) return s;
-          // Remove local fake messages that have been replaced by real ones from Discord
-          const freshFingerprints = new Set(fresh.map((m) => `${m.author.id}:${m.content.trim()}`));
-          const dedupedCur = cur.filter(
-            (m) => !m.id.startsWith("local-") || !freshFingerprints.has(`${m.author.id}:${m.content.trim()}`)
-          );
-          // Newest-first: newer messages go to the front (BigInt comparison for snowflake IDs)
-          const sorted = [...toAdd].sort((a, b) => (BigInt(b.id) > BigInt(a.id) ? 1 : -1));
-          return { cache: { ...s.cache, messages: { ...s.cache.messages, [channelId]: [...sorted, ...dedupedCur] } } };
-        });
-        
-        const sortedAdded = fresh.sort((a, b) => (BigInt(b.id) > BigInt(a.id) ? 1 : -1));
-        if (sortedAdded.length > 0 && document.hasFocus()) {
-          useDiscordStore.getState().clearUnread(accountId, channelId, sortedAdded[0].id);
-        }
-      } catch (e) {
-        console.warn("[poll] erro ao buscar mensagens:", e);
-      }
-    };
-
-    const interval = setInterval(poll, 3000);
-    return () => clearInterval(interval);
-  }, [channelId, accountId]);
+    useDiscordStore.getState().clearUnread(accountId, channelId);
+  }, [accountId, channelId]);
 
   // Scroll para o topo (mais recente) quando muda de canal
   useEffect(() => {
@@ -293,25 +245,25 @@ export function ChatArea({ channelId, accountId }: Props) {
           {/* Lista de mensagens */}
           <div ref={scrollRef} style={{ flex: 1, overflow: "hidden" }}>
             <MessageList
+              key={`${accountId}:${channelId}`}
               messages={messages}
               isLoading={isLoading}
               currentUserId={account?.user_id ?? ""}
               onLoadMore={handleLoadMore}
               onReply={setReplyingTo}
               onDelete={(messageId) => deleteMessage(accountId, channelId, messageId)}
-              channels={activeGuildId ? (cache.channels[accountId]?.[activeGuildId] ?? []) : []}
+              channels={channels}
             />
           </div>
 
-          <TypingIndicator channelId={channelId} />
+          <TypingIndicator accountId={accountId} channelId={channelId} />
 
           {/* Input ou Banners de Bloqueio / Leitura Apenas */}
           {(() => {
-            const dms = cache.dms[accountId] ?? [];
             const dmObj = dms.find((d) => d.id === channelId);
             const dmRecipient = dmObj?.recipients?.[0];
             const isRecipientBlocked = dmRecipient
-              ? cache.relationships[accountId]?.some((r) => r.user.id === dmRecipient.id && r.relationship_type === 2)
+              ? relationships?.some((r) => r.user.id === dmRecipient.id && r.relationship_type === 2)
               : false;
 
             if (isRecipientBlocked) {
@@ -398,6 +350,7 @@ export function ChatArea({ channelId, accountId }: Props) {
 
             return (
               <MessageInput
+          key={`${accountId}:${channelId}`}
                 channelId={channelId}
                 replyingTo={replyingTo}
                 onCancelReply={() => setReplyingTo(null)}
@@ -448,15 +401,15 @@ function ChannelHeader({
   accountId: string;
   onSearch: (q: string) => void;
 }) {
-  const { cache } = useDiscordStore();
-  const { activeGuildId } = useNavigationStore();
-  const { joinCall, leaveCall, isConnecting, isConnected } = useVoiceStore();
+  const { cache } = useDiscordStore(useShallow((s) => ({ cache: s.cache })));
+  const { activeGuildId } = useNavigationStore(useShallow((s) => ({ activeGuildId: s.activeGuildId })));
+  const { joinCall, leaveCall, isConnecting, isConnected } = useVoiceStore(useShallow((s) => ({ joinCall: s.joinCall, leaveCall: s.leaveCall, isConnecting: s.isConnecting, isConnected: s.isConnected })));
 
-  const channels = activeGuildId ? (cache.channels[accountId]?.[activeGuildId] ?? []) : [];
+  const channels = useDiscordStore((s) => activeGuildId ? s.cache.channels[accountId]?.[activeGuildId] : undefined) ?? [];
   const channel = channels.find((c) => c.id === channelId);
   
-  const isThread = !channel && activeGuildId && cache.threads[activeGuildId]?.some(t => t.id === channelId);
-  const threadObj = isThread ? cache.threads[activeGuildId]?.find(t => t.id === channelId) : null;
+  const isThread = !channel && activeGuildId && cache.threads[accountCacheKey(accountId, activeGuildId)]?.some(t => t.id === channelId);
+  const threadObj = isThread ? cache.threads[accountCacheKey(accountId, activeGuildId)]?.find(t => t.id === channelId) : null;
 
   return (
     <div

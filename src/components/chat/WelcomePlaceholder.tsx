@@ -1,10 +1,11 @@
+import { useShallow } from "zustand/react/shallow";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { useDiscordStore } from "@/stores/discordStore";
 import { Hash, Home, Mail } from "lucide-react";
 
 export function WelcomePlaceholder() {
-  const { activeGuildId, activeAccountId, view } = useNavigationStore();
-  const { cache } = useDiscordStore();
+  const { activeGuildId, activeAccountId, view } = useNavigationStore(useShallow((s) => ({ activeGuildId: s.activeGuildId, activeAccountId: s.activeAccountId, view: s.view })));
+  const { cache } = useDiscordStore(useShallow((s) => ({ cache: s.cache })));
 
   const guilds = activeAccountId ? (cache.guilds[activeAccountId] ?? []) : [];
   const activeGuild = guilds.find((g) => g.id === activeGuildId);
