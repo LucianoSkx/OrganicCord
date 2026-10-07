@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useMemo } from "react";
 import { Users } from "lucide-react";
 import { useDiscordStore } from "@/stores/discordStore";
@@ -5,7 +6,7 @@ import { useNavigationStore } from "@/stores/navigationStore";
 import { Avatar } from "@/components/ui/Avatar";
 import type { DiscordActivity, DiscordPresence } from "@/types";
 export function ActiveNowSidebar() {
-  const { activeAccountId } = useNavigationStore();
+  const { activeAccountId } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId })));
   const presences = useDiscordStore((s) => activeAccountId ? s.cache.presences[activeAccountId] : {});
   const relationships = useDiscordStore((s) => activeAccountId ? s.cache.relationships[activeAccountId] : []);
 

@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import React, { useState, useRef, useEffect } from "react";
 import { useAccountStore, type PresenceStatus } from "@/stores/accountStore";
 import { useNavigationStore } from "@/stores/navigationStore";
@@ -25,8 +26,8 @@ interface UserBottomBarProps {
 }
 
 export function UserBottomBar({ onAddAccount }: UserBottomBarProps) {
-  const { accounts, presenceStatus, customStatus } = useAccountStore();
-  const { activeAccountId, openSettings } = useNavigationStore();
+  const { accounts, presenceStatus, customStatus } = useAccountStore(useShallow((s) => ({ accounts: s.accounts, presenceStatus: s.presenceStatus, customStatus: s.customStatus })));
+  const { activeAccountId, openSettings } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, openSettings: s.openSettings })));
   const detectedGame = useGameActivityStore((state) => state.detectedGame);
   
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
@@ -205,8 +206,18 @@ export function UserBottomBar({ onAddAccount }: UserBottomBarProps) {
 function GameActivityLine({ name, startedAt }: { name: string; startedAt: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
+    let timer: number | undefined;
+    const update = () => {
+      window.clearInterval(timer);
+      timer = undefined;
+      if (document.visibilityState === "visible") {
+        setNow(Date.now());
+        timer = window.setInterval(() => setNow(Date.now()), 1_000);
+      }
+    };
+    update();
+    document.addEventListener("visibilitychange", update);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", update); };
   }, []);
 
   const elapsedSeconds = Math.max(0, Math.floor((now - startedAt) / 1_000));
@@ -240,8 +251,8 @@ function FloatingUserStatusPopover({
   onClose: () => void;
   onAddAccount?: () => void;
 }) {
-  const { setPresenceStatus, accounts, presenceStatus } = useAccountStore();
-  const { activeAccountId, setActiveAccount, openSettings } = useNavigationStore();
+  const { setPresenceStatus, accounts, presenceStatus } = useAccountStore(useShallow((s) => ({ setPresenceStatus: s.setPresenceStatus, accounts: s.accounts, presenceStatus: s.presenceStatus })));
+  const { activeAccountId, setActiveAccount, openSettings } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, setActiveAccount: s.setActiveAccount, openSettings: s.openSettings })));
   
   const [profileData, setProfileData] = useState<DiscordUserProfile | null>(null);
   const [activeSubmenu, setActiveSubmenu] = useState<"none" | "status" | "accounts">("none");

@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useState, useEffect } from "react";
 import { Mic, MicOff, Headphones, PhoneOff, Video, ChevronUp, MonitorUp } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
@@ -5,6 +6,7 @@ import { useVoiceStore } from "@/stores/voiceStore";
 import { useAccountStore } from "@/stores/accountStore";
 import { invoke } from "@tauri-apps/api/core";
 import * as Popover from "@radix-ui/react-popover";
+import { toast } from "@/components/ui/Toast";
 
 import { DiscordUser } from "@/types";
 
@@ -41,20 +43,15 @@ export function ActiveCallArea({ recipient }: Props) {
     screenShareStatus,
     screenShareStage,
     screenShareError,
-    isScreenSharing,
-    startScreenShare,
-    stopScreenShare,
     speakingUsers,
     voiceParticipants,
-  } = useVoiceStore();
+  } = useVoiceStore(useShallow((s) => ({ leaveCall: s.leaveCall, isMuted: s.isMuted, isDeafened: s.isDeafened, toggleMute: s.toggleMute, toggleDeafen: s.toggleDeafen, inputDeviceId: s.inputDeviceId, outputDeviceId: s.outputDeviceId, activeOutputDeviceName: s.activeOutputDeviceName, outputFallback: s.outputFallback, outputStatus: s.outputStatus, outputError: s.outputError, setInputDevice: s.setInputDevice, setOutputDevice: s.setOutputDevice, isConnecting: s.isConnecting, isConnected: s.isConnected, connectionStage: s.connectionStage, accountId: s.accountId, screenShareStatus: s.screenShareStatus, screenShareStage: s.screenShareStage, screenShareError: s.screenShareError, speakingUsers: s.speakingUsers, voiceParticipants: s.voiceParticipants })));
   const [devices, setDevices] = useState<AudioDevice[]>([]);
-  const [showShareConfirm, setShowShareConfirm] = useState(false);
   const currentAccount = useAccountStore(state => state.accounts.find(a => a.id === accountId));
   const isRecipientConnected = voiceParticipants.has(recipient.id);
   const isRinging = !isRecipientConnected;
   const isLocalSpeaking = Boolean(currentAccount && speakingUsers.has(currentAccount.user_id) && !isMuted);
   const isRecipientSpeaking = Boolean(speakingUsers.has(recipient.id) && isRecipientConnected);
-  const shareInProgress = screenShareStatus !== "idle" && screenShareStatus !== "error";
 
   useEffect(() => {
     invoke<AudioDevice[]>("get_audio_devices")
@@ -215,51 +212,6 @@ export function ActiveCallArea({ recipient }: Props) {
         </div>
       )}
 
-      {showShareConfirm && (
-        <div
-          role="dialog"
-          aria-label="Confirmar compartilhamento de tela"
-          style={{
-            position: "absolute",
-            left: "50%",
-            bottom: 96,
-            transform: "translateX(-50%)",
-            width: 320,
-            padding: 14,
-            borderRadius: 10,
-            border: "1px solid var(--border-subtle)",
-            background: "var(--bg-floating)",
-            boxShadow: "var(--elevation-high)",
-            zIndex: 20,
-          }}
-        >
-          <div style={{ color: "var(--text-normal)", fontSize: 14, fontWeight: 700 }}>
-            Compartilhar a tela inteira?
-          </div>
-          <div style={{ color: "var(--text-muted)", fontSize: 12, lineHeight: 1.4, marginTop: 5 }}>
-            Tudo que aparecer no monitor poderá ser visto por {recipient.global_name ?? recipient.username}.
-          </div>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-            <button
-              type="button"
-              onClick={() => setShowShareConfirm(false)}
-              style={{ border: "none", background: "transparent", color: "var(--text-normal)", padding: "7px 10px", cursor: "pointer" }}
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setShowShareConfirm(false);
-                void startScreenShare();
-              }}
-              style={{ border: "none", borderRadius: 5, background: "var(--brand-500)", color: "#fff", padding: "7px 12px", fontWeight: 700, cursor: "pointer" }}
-            >
-              Compartilhar
-            </button>
-          </div>
-        </div>
-      )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 36, marginBottom: 24, marginTop: 16 }}>
         {/* Local User */}
@@ -390,24 +342,18 @@ export function ActiveCallArea({ recipient }: Props) {
         {/* Screen Share */}
         <button
           type="button"
-          disabled={!isConnected}
-          aria-pressed={shareInProgress}
+          aria-disabled="true"
+          aria-label="Compartilhamento de tela em desenvolvimento"
           className="header-icon-button"
-          onClick={() => {
-            if (shareInProgress) {
-              void stopScreenShare();
-            } else {
-              setShowShareConfirm(true);
-            }
-          }}
+          onClick={() => toast.info("O compartilhamento de tela ainda está em desenvolvimento.")}
           style={{
             ...controlBtnStyle,
-            background: isScreenSharing ? "var(--status-online)" : "transparent",
-            color: isScreenSharing ? "#fff" : "var(--interactive-normal)",
-            opacity: isConnected ? 1 : 0.5,
-            cursor: isConnected ? "pointer" : "not-allowed",
+            background: "transparent",
+            color: "var(--interactive-normal)",
+            opacity: 0.5,
+            cursor: "not-allowed",
           }}
-          title={shareInProgress ? "Parar compartilhamento" : "Compartilhar a tela inteira"}
+          title="Compartilhamento de tela em desenvolvimento"
         >
           <MonitorUp size={20} />
         </button>

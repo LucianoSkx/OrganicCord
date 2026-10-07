@@ -124,7 +124,7 @@ export function DiscordEmojiPicker({ accountId, onSelect, children }: Props) {
                       fontWeight: 700, 
                       textTransform: "uppercase" 
                     }}>
-                      {g.icon && <img src={g.icon} alt="" style={{ width: 16, height: 16, borderRadius: "50%" }} />}
+                      {g.icon && <img loading="lazy" decoding="async" src={g.icon} alt="" style={{ width: 16, height: 16, borderRadius: "50%" }} />}
                       {g.name}
                     </div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 2 }}>
@@ -154,7 +154,7 @@ export function DiscordEmojiPicker({ accountId, onSelect, children }: Props) {
                             className="hover-bg-modifier"
                             title={`:${emojiName}:`}
                           >
-                            <img src={imgUrl} alt={emojiName} style={{ width: 32, height: 32, objectFit: "contain" }} />
+                            <img loading="lazy" decoding="async" src={imgUrl} alt={emojiName} style={{ width: 32, height: 32, objectFit: "contain" }} />
                           </button>
                         );
                       })}

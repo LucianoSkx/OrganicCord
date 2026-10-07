@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use tauri::Emitter;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -8,12 +8,14 @@ use crate::commands::account::add_account_from_token;
 
 static LOGIN_SUCCESS: AtomicBool = AtomicBool::new(false);
 static IS_EXTRACTING: AtomicBool = AtomicBool::new(false);
+static LOGIN_ATTEMPT: AtomicU64 = AtomicU64::new(0);
 
 #[tauri::command]
 pub async fn start_discord_login(app: AppHandle) -> Result<(), String> {
+    let attempt = LOGIN_ATTEMPT.fetch_add(1, Ordering::SeqCst) + 1;
     // Se já existir a janela (ou estiver fechando), fechar para recriar limpa
     if let Some(win) = app.get_webview_window("discord_login") {
-        let _ = win.close();
+        let _ = win.destroy();
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
 
@@ -38,6 +40,9 @@ pub async fn start_discord_login(app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_millis(400)).await;
+            if LOGIN_ATTEMPT.load(Ordering::SeqCst) != attempt {
+                break;
+            }
 
             // Se já concluiu ou já iniciou a extração, encerrar a checagem
             if LOGIN_SUCCESS.load(Ordering::SeqCst) || IS_EXTRACTING.load(Ordering::SeqCst) {
@@ -90,7 +95,7 @@ pub async fn start_discord_login(app: AppHandle) -> Result<(), String> {
                             }
 
                             if (token) {
-                                window.__TAURI_INTERNALS__.invoke("discord_login_success", { token: token.replace(/^"|"$/g, '') });
+                                window.__TAURI_INTERNALS__.invoke("discord_login_success", { token: token.replace(/^"|"$/g, ''), attemptId: __LOGIN_ATTEMPT__ });
                             }
                         } catch (e) {
                             console.error("[auth script error]", e);
@@ -98,7 +103,7 @@ pub async fn start_discord_login(app: AppHandle) -> Result<(), String> {
                     })();
                 "#;
 
-                let _ = win.eval(js);
+                let _ = win.eval(js.replace("__LOGIN_ATTEMPT__", &attempt.to_string()));
                 break; // Finaliza o loop para não reenviar script
             }
         }
@@ -110,6 +115,7 @@ pub async fn start_discord_login(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn discord_login_success(
     mut token: String,
+    attempt_id: u64,
     app: AppHandle,
     window: WebviewWindow,
 ) -> Result<(), String> {
@@ -118,16 +124,19 @@ pub async fn discord_login_success(
         return Err("Origem de autenticação inválida.".to_string());
     }
 
-    if LOGIN_SUCCESS.load(Ordering::SeqCst) {
+    if LOGIN_SUCCESS.load(Ordering::SeqCst) || LOGIN_ATTEMPT.load(Ordering::SeqCst) != attempt_id {
         token.zeroize();
         return Ok(());
     }
 
     let result = add_account_from_token(&token, &app).await;
     token.zeroize();
+    if LOGIN_ATTEMPT.load(Ordering::SeqCst) != attempt_id {
+        return Ok(());
+    }
 
     if let Some(win) = app.get_webview_window("discord_login") {
-        let _ = win.close();
+        let _ = win.destroy();
     }
 
     match result {
@@ -152,8 +161,9 @@ pub async fn discord_login_success(
 
 #[tauri::command]
 pub async fn cancel_discord_login(app: AppHandle) -> Result<(), String> {
+    LOGIN_ATTEMPT.fetch_add(1, Ordering::SeqCst);
     if let Some(win) = app.get_webview_window("discord_login") {
-        let _ = win.close();
+        let _ = win.destroy();
     }
     let _ = app.emit(
         "discord-login-cancelled",

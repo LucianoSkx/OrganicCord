@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { useAccountStore } from "./accountStore";
 import { soundService } from "@/lib/soundService";
+import { useSettingsStore } from "./settingsStore";
 import type { DiscordUser } from "@/types";
 
 export interface PingData {
@@ -28,6 +29,8 @@ type ScreenShareStatus =
   | "connected"
   | "streaming"
   | "error";
+
+const SCREEN_SHARE_READY = false;
 
 interface VoiceState {
   isConnecting: boolean;
@@ -122,6 +125,14 @@ function savePreference(key: string, value: string | null) {
   }
 }
 
+function playJoinSound() {
+  if (useSettingsStore.getState().settings.soundUserJoin) soundService.playUserJoined();
+}
+
+function playLeaveSound() {
+  if (useSettingsStore.getState().settings.soundUserLeave) soundService.playUserLeft();
+}
+
 export const useVoiceStore = create<VoiceState>((set, get) => ({
   isConnecting: false,
   isConnected: false,
@@ -164,9 +175,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
       const next = new Set(state.speakingUsers);
       if (speaking) next.add(userId);
       else next.delete(userId);
-      const participants = new Set(state.voiceParticipants);
-      if (speaking) participants.add(userId);
-      return { speakingUsers: next, voiceParticipants: participants };
+      return { speakingUsers: next };
     });
   },
 
@@ -176,6 +185,9 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     const myId = account?.user_id ?? account?.id;
     const isOtherUser = userId !== myId;
     const isDm = !current.guildId;
+    const wasPresent = current.voiceParticipants.has(userId);
+
+    if (wasPresent === present) return;
 
     set((state) => {
       const next = new Set(state.voiceParticipants);
@@ -192,9 +204,9 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     if (isDm && isOtherUser) {
       if (present) {
         soundService.stopOutgoingRing();
-        soundService.playUserJoined();
+        playJoinSound();
       } else {
-        soundService.playUserLeft();
+        playLeaveSound();
       }
     }
   },
@@ -260,9 +272,9 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   toggleMute: () => {
     const willMute = !get().isMuted;
     if (willMute) {
-      soundService.playMute();
+      if (useSettingsStore.getState().settings.soundMuteToggle) soundService.playMute();
     } else {
-      soundService.playUnmute();
+      if (useSettingsStore.getState().settings.soundMuteToggle) soundService.playUnmute();
     }
     set({ isMuted: willMute });
     void syncVoiceControls(get()).catch((error) => console.error("Falha ao atualizar mute:", error));
@@ -270,9 +282,9 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   toggleDeafen: () => {
     const willDeafen = !get().isDeafened;
     if (willDeafen) {
-      soundService.playDeafen();
+      if (useSettingsStore.getState().settings.soundMuteToggle) soundService.playDeafen();
     } else {
-      soundService.playUndeafen();
+      if (useSettingsStore.getState().settings.soundMuteToggle) soundService.playUndeafen();
     }
     set({ isDeafened: willDeafen });
     void syncVoiceControls(get()).catch((error) => console.error("Falha ao atualizar deafen:", error));
@@ -283,6 +295,16 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
   },
 
   startScreenShare: async () => {
+    if (!SCREEN_SHARE_READY) {
+      set({
+        screenShareStatus: "error",
+        screenShareStage: "Compartilhamento indisponível",
+        screenShareError: "O compartilhamento de tela ainda está em desenvolvimento.",
+        screenShareViewOpen: false,
+        isScreenSharing: false,
+      });
+      return;
+    }
     const current = get();
     if (!current.isConnected || !current.accountId || !current.channelId) {
       set({
@@ -478,7 +500,7 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     soundService.stopOutgoingRing();
     soundService.stopIncomingRing();
     if (isConnected) {
-      soundService.playUserLeft();
+      playLeaveSound();
     }
     if (accountId) {
       await get().stopScreenShare();
@@ -545,14 +567,13 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     // Se alguém atendeu a chamada via CALL_UPDATE
     if (!hadOthers && nowHasOthers) {
       soundService.stopOutgoingRing();
-      soundService.playUserJoined();
+      playJoinSound();
     }
 
     // Se estávamos chamando em DM, o ringing zerou e ninguém atendeu -> chamada recusada/encerrada
     const wasRinging = current.ringingUsers.size > 0 || (current.isConnected && !hadOthers && !current.guildId);
     if (!current.guildId && wasRinging && !nowHasOthers && ringing.length === 0 && voiceStates.length <= 1) {
       soundService.stopOutgoingRing();
-      soundService.playUserLeft();
       void get().leaveCall();
       return;
     }
@@ -567,7 +588,6 @@ export const useVoiceStore = create<VoiceState>((set, get) => ({
     const current = get();
     if (current.channelId !== channelId) return;
     soundService.stopOutgoingRing();
-    soundService.playUserLeft();
     void get().leaveCall();
   },
 }));
@@ -600,12 +620,12 @@ if (typeof window !== "undefined") {
       if (!isDm || hasOtherParticipants) {
         soundService.stopOutgoingRing();
         soundService.stopIncomingRing();
-        soundService.playUserJoined();
+        playJoinSound();
       }
     } else if (wasConnected && (payload.status === "disconnected" || payload.status === "error")) {
       soundService.stopOutgoingRing();
       soundService.stopIncomingRing();
-      soundService.playUserLeft();
+      playLeaveSound();
     }
 
     useVoiceStore.setState({

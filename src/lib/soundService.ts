@@ -12,6 +12,17 @@ class SoundService {
   private outgoingGainNode: GainNode | null = null;
   private isIncomingRinging = false;
   private isOutgoingRinging = false;
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private scheduleIdle() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (!this.isIncomingRinging && !this.isOutgoingRinging && this.ctx?.state === "running") {
+        void this.ctx.suspend().catch(() => undefined);
+      }
+    }, 3_000);
+  }
 
   private getContext(): AudioContext | null {
     if (typeof window === "undefined") return null;
@@ -24,6 +35,7 @@ class SoundService {
     if (this.ctx && this.ctx.state === "suspended") {
       void this.ctx.resume().catch(() => undefined);
     }
+    this.scheduleIdle();
     return this.ctx;
   }
 
@@ -36,7 +48,8 @@ class SoundService {
     startTime: number,
     duration: number,
     volume: number,
-    destination: AudioNode
+    destination: AudioNode,
+    disconnectDestination = false,
   ) {
     const osc = ctx.createOscillator();
     const harmonic = ctx.createOscillator();
@@ -67,6 +80,10 @@ class SoundService {
     harmonic.start(startTime);
     osc.stop(startTime + duration + 0.02);
     harmonic.stop(startTime + duration + 0.02);
+    osc.onended = () => {
+      osc.disconnect(); harmonic.disconnect(); filter.disconnect(); gain.disconnect();
+      if (disconnectDestination) destination.disconnect();
+    };
   }
 
   // ==========================================
@@ -102,7 +119,7 @@ class SoundService {
       ];
 
       for (const n of notes) {
-        this.playOrganicTone(ctx, n.f, now + n.t, n.d, n.v, this.incomingGainNode);
+        this.playOrganicTone(ctx, n.f, now + n.t, n.d, n.v, this.incomingGainNode, n === notes[notes.length - 1]);
       }
 
       // Intervalo entre ciclos do toque: 2.7 segundos
@@ -114,22 +131,22 @@ class SoundService {
 
   public stopIncomingRing(): void {
     this.isIncomingRinging = false;
+    this.scheduleIdle();
     if (this.incomingLoopTimeout !== null) {
       clearTimeout(this.incomingLoopTimeout);
       this.incomingLoopTimeout = null;
     }
     if (this.incomingGainNode && this.ctx) {
+      const gain = this.incomingGainNode;
+      this.incomingGainNode = null;
       try {
         const now = this.ctx.currentTime;
-        this.incomingGainNode.gain.cancelScheduledValues(now);
-        this.incomingGainNode.gain.setValueAtTime(this.incomingGainNode.gain.value, now);
-        this.incomingGainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
-        setTimeout(() => {
-          this.incomingGainNode?.disconnect();
-          this.incomingGainNode = null;
-        }, 50);
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setValueAtTime(gain.gain.value, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
+        setTimeout(() => gain.disconnect(), 50);
       } catch {
-        this.incomingGainNode = null;
+        gain.disconnect();
       }
     }
   }
@@ -164,7 +181,7 @@ class SoundService {
       ];
 
       for (const p of phrase) {
-        this.playOrganicTone(ctx, p.f, now + p.t, p.d, p.v, this.outgoingGainNode);
+        this.playOrganicTone(ctx, p.f, now + p.t, p.d, p.v, this.outgoingGainNode, p === phrase[phrase.length - 1]);
       }
 
       this.outgoingLoopTimeout = window.setTimeout(runLoop, 3100);
@@ -175,22 +192,22 @@ class SoundService {
 
   public stopOutgoingRing(): void {
     this.isOutgoingRinging = false;
+    this.scheduleIdle();
     if (this.outgoingLoopTimeout !== null) {
       clearTimeout(this.outgoingLoopTimeout);
       this.outgoingLoopTimeout = null;
     }
     if (this.outgoingGainNode && this.ctx) {
+      const gain = this.outgoingGainNode;
+      this.outgoingGainNode = null;
       try {
         const now = this.ctx.currentTime;
-        this.outgoingGainNode.gain.cancelScheduledValues(now);
-        this.outgoingGainNode.gain.setValueAtTime(this.outgoingGainNode.gain.value, now);
-        this.outgoingGainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
-        setTimeout(() => {
-          this.outgoingGainNode?.disconnect();
-          this.outgoingGainNode = null;
-        }, 50);
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setValueAtTime(gain.gain.value, now);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
+        setTimeout(() => gain.disconnect(), 50);
       } catch {
-        this.outgoingGainNode = null;
+        gain.disconnect();
       }
     }
   }
@@ -207,7 +224,7 @@ class SoundService {
 
     // Tom ascendente brilhante (E5 -> B5)
     this.playOrganicTone(ctx, 659.25, now, 0.18, 0.26, gain);
-    this.playOrganicTone(ctx, 987.77, now + 0.08, 0.35, 0.32, gain);
+    this.playOrganicTone(ctx, 987.77, now + 0.08, 0.35, 0.32, gain, true);
   }
 
   public playUserLeft(): void {
@@ -219,7 +236,7 @@ class SoundService {
 
     // Tom descendente aveludado (A4 -> D4)
     this.playOrganicTone(ctx, 440.0, now, 0.18, 0.26, gain);
-    this.playOrganicTone(ctx, 293.66, now + 0.09, 0.32, 0.22, gain);
+    this.playOrganicTone(ctx, 293.66, now + 0.09, 0.32, 0.22, gain, true);
   }
 
   // ==========================================
@@ -234,7 +251,7 @@ class SoundService {
 
     // Clique descendente rápido e discreto
     this.playOrganicTone(ctx, 420.0, now, 0.07, 0.22, gain);
-    this.playOrganicTone(ctx, 310.0, now + 0.035, 0.09, 0.24, gain);
+    this.playOrganicTone(ctx, 310.0, now + 0.035, 0.09, 0.24, gain, true);
   }
 
   public playUnmute(): void {
@@ -246,7 +263,7 @@ class SoundService {
 
     // Clique ascendente rápido e limpo
     this.playOrganicTone(ctx, 330.0, now, 0.07, 0.22, gain);
-    this.playOrganicTone(ctx, 480.0, now + 0.035, 0.1, 0.26, gain);
+    this.playOrganicTone(ctx, 480.0, now + 0.035, 0.1, 0.26, gain, true);
   }
 
   // ==========================================
@@ -279,6 +296,7 @@ class SoundService {
 
     osc.start(now);
     osc.stop(now + 0.15);
+    osc.onended = () => { osc.disconnect(); filter.disconnect(); gain.disconnect(); };
   }
 
   public playUndeafen(): void {
@@ -308,6 +326,7 @@ class SoundService {
 
     osc.start(now);
     osc.stop(now + 0.15);
+    osc.onended = () => { osc.disconnect(); filter.disconnect(); gain.disconnect(); };
   }
 }
 

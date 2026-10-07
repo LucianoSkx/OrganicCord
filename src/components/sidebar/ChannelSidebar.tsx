@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { channelErrorKey, useDiscordStore } from "@/stores/discordStore";
@@ -31,12 +32,15 @@ interface Props {
 }
 
 export function ChannelSidebar({ guildId }: Props) {
-  const { activeAccountId, activeChannelId, setActiveChannel } = useNavigationStore();
-  const { cache, channelLoads, fetchChannels } = useDiscordStore();
-  const { accounts } = useAccountStore();
+  const { activeAccountId, activeChannelId, setActiveChannel } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, activeChannelId: s.activeChannelId, setActiveChannel: s.setActiveChannel })));
+  const fetchChannels = useDiscordStore((s) => s.fetchChannels);
+  const cachedChannels = useDiscordStore((s) => activeAccountId ? s.cache.channels[activeAccountId]?.[guildId] : undefined);
+  const cachedGuilds = useDiscordStore((s) => activeAccountId ? s.cache.guilds[activeAccountId] : undefined);
+  const cachedUnreads = useDiscordStore((s) => activeAccountId ? s.cache.unreads[activeAccountId] : undefined);
+  const channelLoad = useDiscordStore((s) => activeAccountId ? s.channelLoads[activeAccountId]?.[guildId] : undefined);
+  const { accounts } = useAccountStore(useShallow((s) => ({ accounts: s.accounts })));
 
-  const channels = activeAccountId ? (cache.channels[activeAccountId]?.[guildId] ?? []) : [];
-  const channelLoad = activeAccountId ? channelLoads[activeAccountId]?.[guildId] : undefined;
+  const channels = cachedChannels ?? [];
   const isLoading = channelLoad?.status === "loading";
   const isInitialLoading = isLoading && channels.length === 0;
   const fetchError = useDiscordStore((s) => activeAccountId
@@ -44,10 +48,10 @@ export function ChannelSidebar({ guildId }: Props) {
     : undefined);
   const activeAccount = accounts.find((a) => a.id === activeAccountId);
   
-  const unreads = activeAccountId ? (cache.unreads[activeAccountId] ?? {}) : {};
+  const unreads = cachedUnreads ?? {};
 
   // Get guild info for the header
-  const guilds = activeAccountId ? (cache.guilds[activeAccountId] ?? []) : [];
+  const guilds = cachedGuilds ?? [];
   const guild = guilds.find((g) => g.id === guildId);
   const guildIconUrl = guild?.icon ? getGuildIconUrl(guild.id, guild.icon) : null;
 
@@ -294,8 +298,8 @@ function CategoryGroup({
   onChannelClick: (id: string) => void;
   unreads: Record<string, { count: number; mentions: number }>;
 }) {
-  const { activeAccountId, activeGuildId } = useNavigationStore();
-  const { joinCall } = useVoiceStore();
+  const { activeAccountId, activeGuildId } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, activeGuildId: s.activeGuildId })));
+  const { joinCall } = useVoiceStore(useShallow((s) => ({ joinCall: s.joinCall })));
   const hasActive = channels.some((c) => c.id === activeChannelId || (threadMap[c.id] && threadMap[c.id].some(t => t.id === activeChannelId)));
   const [open, setOpen] = useState(true);
 
@@ -415,8 +419,8 @@ function ChannelRow({
   isUnread?: boolean;
   mentionCount?: number;
 }) {
-  const { activeAccountId, activeGuildId } = useNavigationStore();
-  const { cache } = useDiscordStore();
+  const { activeAccountId, activeGuildId } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, activeGuildId: s.activeGuildId })));
+  const { cache } = useDiscordStore(useShallow((s) => ({ cache: s.cache })));
   const type = ctype(channel);
   const isVoice = type === CT.VOICE || type === CT.STAGE;
   const icon = channelIcon(type);

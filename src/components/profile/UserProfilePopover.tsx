@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import React, { useState, useEffect } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { fetchUserProfile } from "@/lib/tauri";
@@ -19,9 +20,9 @@ export function UserProfilePopover({
   const [open, setOpen] = useState(false);
   const [profile, setProfile] = useState<DiscordUserProfile | null>(null);
   const [loading, setLoading] = useState(false);
-  const { activeAccountId } = useNavigationStore();
+  const { activeAccountId } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId })));
   const { openProfile } = useProfileStore();
-  const { cache } = useDiscordStore();
+  const { cache } = useDiscordStore(useShallow((s) => ({ cache: s.cache })));
   
   const presence = activeAccountId ? cache.presences[activeAccountId]?.[userId] : null;
   const activities = presence?.activities || [];

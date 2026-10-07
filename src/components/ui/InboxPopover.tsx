@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import React, { useState, useEffect } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { Inbox, Bell, AtSign, Loader2 } from "lucide-react";
@@ -8,7 +9,7 @@ import { DiscordText } from "@/components/ui/DiscordText";
 import type { DiscordMessage } from "@/types";
 
 export function InboxPopover() {
-  const { activeAccountId, setActiveGuild, setActiveChannel, setView } = useNavigationStore();
+  const { activeAccountId, setActiveGuild, setActiveChannel, setView } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, setActiveGuild: s.setActiveGuild, setActiveChannel: s.setActiveChannel, setView: s.setView })));
   
   const [open, setOpen] = useState(false);
   const [mentions, setMentions] = useState<DiscordMessage[]>([]);

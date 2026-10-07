@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 use std::sync::Mutex as StdMutex;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -347,12 +348,18 @@ impl StereoLinearResampler {
     }
 
     fn push_interleaved(&mut self, samples: &[f32]) -> Vec<f32> {
+        let mut output = Vec::new();
+        self.push_interleaved_into(samples, &mut output);
+        output
+    }
+
+    fn push_interleaved_into(&mut self, samples: &[f32], output: &mut Vec<f32>) {
         self.frames
             .extend(samples.chunks_exact(2).map(|frame| [frame[0], frame[1]]));
 
         let step = self.source_rate / self.target_rate;
-        let mut output =
-            Vec::with_capacity(((samples.len() as f64 / step).ceil() as usize).saturating_add(4));
+        output.clear();
+        output.reserve(((samples.len() as f64 / step).ceil() as usize).saturating_add(4));
 
         while self.position + 1.0 < self.frames.len() as f64 {
             let index = self.position.floor() as usize;
@@ -369,30 +376,68 @@ impl StereoLinearResampler {
             self.frames.pop_front();
         }
         self.position -= consumed as f64;
-        output
     }
 }
 
+#[cfg(test)]
 fn input_to_stereo<T>(data: &[T], channels: usize) -> Vec<f32>
-where
-    T: Sample + Copy,
-    f32: FromSample<T>,
-{
-    if channels == 0 {
-        return Vec::new();
-    }
+where T: Sample + Copy, f32: FromSample<T> {
+    let mut output = Vec::new();
+    input_to_stereo_into(data, channels, &mut output);
+    output
+}
 
-    let mut output = Vec::with_capacity((data.len() / channels) * 2);
+fn input_to_stereo_into<T>(data: &[T], channels: usize, output: &mut Vec<f32>)
+where T: Sample + Copy, f32: FromSample<T> {
+    output.clear();
+    if channels == 0 { return; }
+    output.reserve((data.len() / channels) * 2);
     for frame in data.chunks_exact(channels) {
         let left = f32::from_sample(frame[0]);
-        let right = if channels > 1 {
-            f32::from_sample(frame[1])
-        } else {
-            left
-        };
+        let right = if channels > 1 { f32::from_sample(frame[1]) } else { left };
         output.extend_from_slice(&[left, right]);
     }
-    output
+}
+
+const RNNOISE_FRAME_SIZE: usize = 480;
+const PCM16_SCALE: f32 = 32_768.0;
+
+fn stereo_to_rnnoise_input(
+    frame: &[f32; 1_920],
+    offset: usize,
+    input: &mut [f32; RNNOISE_FRAME_SIZE],
+) {
+    for (index, sample) in input.iter_mut().enumerate() {
+        let position = (offset + index) * 2;
+        let mono = (frame[position] + frame[position + 1]) * 0.5;
+        *sample = if mono.is_finite() {
+            (mono * PCM16_SCALE).clamp(-PCM16_SCALE, PCM16_SCALE - 1.0)
+        } else {
+            0.0
+        };
+    }
+}
+
+fn rnnoise_output_to_stereo(
+    frame: &mut [f32; 1_920],
+    offset: usize,
+    output: &[f32; RNNOISE_FRAME_SIZE],
+) {
+    for (index, &sample) in output.iter().enumerate() {
+        let normalized = if sample.is_finite() {
+            (sample / PCM16_SCALE).clamp(-1.0, 1.0)
+        } else {
+            0.0
+        };
+        let position = (offset + index) * 2;
+        frame[position] = normalized;
+        frame[position + 1] = normalized;
+    }
+}
+
+struct PlaybackQueue {
+    samples: VecDeque<f32>,
+    last_packet: Instant,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -419,7 +464,12 @@ where
     let channels = usize::from(config.channels);
     let mut resampler = StereoLinearResampler::new(config.sample_rate, 48_000);
     let mut pcm_buffer = Vec::with_capacity(3_840);
+    let mut stereo = Vec::with_capacity(3_840);
+    let mut resampled = Vec::with_capacity(3_840);
+    let mut frame = [0.0f32; 1_920];
     let mut denoiser = DenoiseState::new();
+    let mut denoise_input = [0.0f32; RNNOISE_FRAME_SIZE];
+    let mut denoise_output = [0.0f32; RNNOISE_FRAME_SIZE];
     let mut sequence = 0u16;
     let mut timestamp = 0u32;
     let mut nonce_counter = 0u32;
@@ -446,11 +496,23 @@ where
         .build_input_stream(
             config,
             move |data: &[T], _: &_| {
-                let stereo = input_to_stereo(data, channels);
-                pcm_buffer.extend(resampler.push_interleaved(&stereo));
+                if muted.load(Ordering::Relaxed) {
+                    pcm_buffer.clear();
+                    resampler.frames.clear();
+                    resampler.position = 0.0;
+                    if is_speaking {
+                        is_speaking = false;
+                        silence_frames = 0;
+                        if let Some(tx) = &speaking_sender { let _ = tx.send(false); }
+                    }
+                    return;
+                }
+                input_to_stereo_into(data, channels, &mut stereo);
+                resampler.push_interleaved_into(&stereo, &mut resampled);
+                pcm_buffer.extend_from_slice(&resampled);
 
                 while pcm_buffer.len() >= 1_920 {
-                    let mut frame: Vec<f32> = pcm_buffer.drain(..1_920).collect();
+                    for (target, sample) in frame.iter_mut().zip(pcm_buffer.drain(..1_920)) { *target = sample; }
                     let is_muted = muted.load(Ordering::Relaxed);
                     if is_muted {
                         if is_speaking {
@@ -463,9 +525,22 @@ where
                         continue;
                     }
 
-                    let sum_sq: f32 = frame.iter().map(|&s| s * s).sum();
+                    let mut voice_probability = 0.0f32;
+                    if krisp_enabled {
+                        for offset in [0, RNNOISE_FRAME_SIZE] {
+                            // RNNoise expects 48 kHz mono samples in the PCM16 range.
+                            stereo_to_rnnoise_input(&frame, offset, &mut denoise_input);
+                            voice_probability = voice_probability
+                                .max(denoiser.process_frame(&mut denoise_output, &denoise_input));
+                            rnnoise_output_to_stereo(&mut frame, offset, &denoise_output);
+                        }
+                    }
+
+                    let sum_sq: f32 = frame.iter().map(|&sample| sample * sample).sum();
                     let rms = (sum_sq / frame.len() as f32).sqrt();
-                    if rms > VAD_THRESHOLD {
+                    let has_voice = rms > VAD_THRESHOLD
+                        || (krisp_enabled && voice_probability > 0.6 && rms > 0.003);
+                    if has_voice {
                         silence_frames = 0;
                         if !is_speaking {
                             is_speaking = true;
@@ -480,25 +555,6 @@ where
                             silence_frames = 0;
                             if let Some(tx) = &speaking_sender {
                                 let _ = tx.send(false);
-                            }
-                        }
-                    }
-
-                    if krisp_enabled {
-                        for offset in [0, 480] {
-                            let mut left_in = [0.0f32; 480];
-                            let mut right_in = [0.0f32; 480];
-                            let mut left_out = [0.0f32; 480];
-                            let mut right_out = [0.0f32; 480];
-                            for index in 0..480 {
-                                left_in[index] = frame[(offset + index) * 2];
-                                right_in[index] = frame[(offset + index) * 2 + 1];
-                            }
-                            denoiser.process_frame(&mut left_out, &left_in);
-                            denoiser.process_frame(&mut right_out, &right_in);
-                            for index in 0..480 {
-                                frame[(offset + index) * 2] = left_out[index];
-                                frame[(offset + index) * 2 + 1] = right_out[index];
                             }
                         }
                     }
@@ -562,7 +618,7 @@ pub fn start_audio_capture(
     speaking_sender: Option<mpsc::UnboundedSender<bool>>,
 ) -> Result<cpal::Stream, String> {
     log::info!(
-        "[audio] Iniciando captura de microfone (Krisp IA: {})...",
+        "[audio] Iniciando captura de microfone (RNNoise: {})...",
         krisp_enabled
     );
     let host = cpal::default_host();
@@ -634,7 +690,7 @@ pub fn start_audio_capture(
 fn build_playback_stream<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
-    queues: Arc<StdMutex<HashMap<u32, VecDeque<f32>>>>,
+    queues: Arc<StdMutex<HashMap<u32, PlaybackQueue>>>,
     deafened: Arc<AtomicBool>,
     first_pcm_consumed: Arc<AtomicBool>,
     playback_events: mpsc::UnboundedSender<AudioPlaybackEvent>,
@@ -658,7 +714,7 @@ where
                         let mut mixed = 0.0f32;
                         let mut active_sources = 0usize;
                         for samples in sources.values_mut() {
-                            if let Some(sample) = samples.pop_front() {
+                            if let Some(sample) = samples.samples.pop_front() {
                                 mixed += sample;
                                 active_sources += 1;
                             }
@@ -679,7 +735,7 @@ where
                 if muted {
                     sources.clear();
                 } else {
-                    sources.retain(|_, samples| !samples.is_empty());
+                    sources.retain(|_, queue| !queue.samples.is_empty() || queue.last_packet.elapsed() < Duration::from_secs(2));
                 }
             },
             move |error| log::error!("[audio] Erro no stream de saída: {error}"),
@@ -740,7 +796,7 @@ struct PlaybackFormat {
 
 fn open_playback_stream(
     requested_device_id: Option<&str>,
-    queues: Arc<StdMutex<HashMap<u32, VecDeque<f32>>>>,
+    queues: Arc<StdMutex<HashMap<u32, PlaybackQueue>>>,
     deafened: Arc<AtomicBool>,
     playback_events: mpsc::UnboundedSender<AudioPlaybackEvent>,
 ) -> Result<(cpal::Stream, AudioOutputInfo, PlaybackFormat), String> {
@@ -824,7 +880,7 @@ pub fn run_audio_playback(
 ) -> Result<(), String> {
     log::info!("[audio] Iniciando recepção e reprodução de áudio...");
     let cipher = TransportCipher::new(encryption_mode, &secret_key)?;
-    let sample_queues = Arc::new(StdMutex::new(HashMap::<u32, VecDeque<f32>>::new()));
+    let sample_queues = Arc::new(StdMutex::new(HashMap::<u32, PlaybackQueue>::new()));
     let initial_requested = output_device.borrow().clone();
     let (mut stream, initial_info, initial_format) = match open_playback_stream(
         initial_requested.as_deref(),
@@ -844,6 +900,7 @@ pub fn run_audio_playback(
     let receiver_queues = sample_queues.clone();
     let receiver_format = playback_format.clone();
     let receiver_events = playback_events.clone();
+    let receiver_deafened = deafened.clone();
     runtime.spawn(async move {
         let mut decoders = HashMap::<u32, Decoder>::new();
         let mut resamplers = HashMap::<u32, StereoLinearResampler>::new();
@@ -860,6 +917,7 @@ pub fn run_audio_playback(
         let mut decoded_packets = 0u64;
 
         let mut buf = [0u8; 2048];
+        let mut pcm_out = vec![0.0f32; 11_520];
         loop {
             let received = tokio::select! {
                 changed = cancel.changed() => {
@@ -978,6 +1036,9 @@ pub fn run_audio_playback(
                         }
                     };
 
+                    // Keep DAVE replay state current even while deafened; only
+                    // decoding/mixing can be skipped after decrypting the frame.
+                    if receiver_deafened.load(Ordering::Relaxed) { continue; }
                     if let std::collections::hash_map::Entry::Vacant(entry) =
                         decoders.entry(sender_ssrc)
                     {
@@ -989,7 +1050,6 @@ pub fn run_audio_playback(
                     let Some(decoder) = decoders.get_mut(&sender_ssrc) else {
                         continue;
                     };
-                    let mut pcm_out = vec![0.0f32; 11_520];
                     match decoder.decode_float(&final_opus, &mut pcm_out, false) {
                         Ok(num_samples) => {
                             decoded_packets = decoded_packets.saturating_add(1);
@@ -1042,15 +1102,16 @@ pub fn run_audio_playback(
                             if let Ok(mut queues) = receiver_queues.lock() {
                                 let queue = queues
                                     .entry(sender_ssrc)
-                                    .or_insert_with(|| VecDeque::with_capacity(queue_capacity));
-                                let overflow = queue
+                                    .or_insert_with(|| PlaybackQueue { samples: VecDeque::with_capacity(queue_capacity), last_packet: Instant::now() });
+                                let overflow = queue.samples
                                     .len()
                                     .saturating_add(output.len())
                                     .saturating_sub(queue_capacity);
-                                for _ in 0..overflow.min(queue.len()) {
-                                    queue.pop_front();
+                                for _ in 0..overflow.min(queue.samples.len()) {
+                                    queue.samples.pop_front();
                                 }
-                                queue.extend(output);
+                                queue.samples.extend(output);
+                                queue.last_packet = Instant::now();
                             }
                         }
                         Err(error) => {
@@ -1204,12 +1265,68 @@ mod transport_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{input_to_stereo, rtp_transport_layout, StereoLinearResampler};
+    use super::{
+        input_to_stereo, rnnoise_output_to_stereo, rtp_transport_layout,
+        stereo_to_rnnoise_input, StereoLinearResampler, RNNOISE_FRAME_SIZE,
+    };
 
     #[test]
     fn converts_mono_pcm_to_stereo() {
         let stereo = input_to_stereo(&[0.25f32, -0.5], 1);
         assert_eq!(stereo, vec![0.25, 0.25, -0.5, -0.5]);
+    }
+
+    #[test]
+    fn converts_normalized_microphone_audio_to_rnnoise_pcm16_and_back() {
+        let mut frame = [0.0f32; 1_920];
+        frame[0] = 0.5;
+        frame[1] = 0.25;
+        frame[RNNOISE_FRAME_SIZE * 2] = -0.5;
+        frame[RNNOISE_FRAME_SIZE * 2 + 1] = -0.25;
+
+        let mut input = [0.0f32; RNNOISE_FRAME_SIZE];
+        stereo_to_rnnoise_input(&frame, 0, &mut input);
+        assert_eq!(input[0], 12_288.0);
+        stereo_to_rnnoise_input(&frame, RNNOISE_FRAME_SIZE, &mut input);
+        assert_eq!(input[0], -12_288.0);
+
+        rnnoise_output_to_stereo(&mut frame, RNNOISE_FRAME_SIZE, &input);
+        assert_eq!(frame[RNNOISE_FRAME_SIZE * 2], -0.375);
+        assert_eq!(frame[RNNOISE_FRAME_SIZE * 2 + 1], -0.375);
+    }
+
+    #[test]
+    fn keeps_invalid_or_overdriven_samples_out_of_the_denoiser_and_encoder() {
+        let mut frame = [0.0f32; 1_920];
+        frame[0] = f32::NAN;
+        frame[1] = 0.5;
+        frame[2] = 2.0;
+        frame[3] = 2.0;
+        let mut input = [0.0f32; RNNOISE_FRAME_SIZE];
+        stereo_to_rnnoise_input(&frame, 0, &mut input);
+        assert_eq!(input[0], 0.0);
+        assert_eq!(input[1], 32_767.0);
+
+        input[0] = f32::NAN;
+        rnnoise_output_to_stereo(&mut frame, 0, &input);
+        assert_eq!(frame[0], 0.0);
+        assert_eq!(frame[1], 0.0);
+        assert!(frame[2] <= 1.0 && frame[3] <= 1.0);
+    }
+
+    #[test]
+    fn reusable_resampling_matches_chunked_output_and_reuses_capacity() {
+        let input: Vec<f32> = (0..882).map(|index| (index as f32 / 100.0).sin()).collect();
+        let mut allocating = StereoLinearResampler::new(44_100, 48_000);
+        let mut reusable = StereoLinearResampler::new(44_100, 48_000);
+        let mut buffer = Vec::with_capacity(2048);
+        let address = buffer.as_ptr();
+        for _ in 0..100 {
+            let expected = allocating.push_interleaved(&input);
+            reusable.push_interleaved_into(&input, &mut buffer);
+            assert_eq!(buffer, expected);
+            assert_eq!(buffer.as_ptr(), address);
+        }
     }
 
     #[test]

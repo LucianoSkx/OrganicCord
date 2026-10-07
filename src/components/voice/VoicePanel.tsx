@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useVoiceStore } from "@/stores/voiceStore";
 import { useDiscordStore } from "@/stores/discordStore";
 import {
@@ -33,9 +34,9 @@ export function VoicePanel() {
     setScreenShareViewOpen,
     speakingUsers,
     voiceParticipants,
-  } = useVoiceStore();
+  } = useVoiceStore(useShallow((s) => ({ isConnected: s.isConnected, isConnecting: s.isConnecting, connectionStage: s.connectionStage, channelId: s.channelId, guildId: s.guildId, accountId: s.accountId, leaveCall: s.leaveCall, isMuted: s.isMuted, isDeafened: s.isDeafened, toggleMute: s.toggleMute, toggleDeafen: s.toggleDeafen, activeOutputDeviceName: s.activeOutputDeviceName, outputStatus: s.outputStatus, outputFallback: s.outputFallback, outputError: s.outputError, screenShareStatus: s.screenShareStatus, screenShareStage: s.screenShareStage, screenShareError: s.screenShareError, stopScreenShare: s.stopScreenShare, screenShareViewOpen: s.screenShareViewOpen, setScreenShareViewOpen: s.setScreenShareViewOpen, speakingUsers: s.speakingUsers, voiceParticipants: s.voiceParticipants })));
   
-  const { cache } = useDiscordStore();
+  const cachedChannels = useDiscordStore((s) => accountId && guildId ? s.cache.channels[accountId]?.[guildId] : undefined);
   const [channelName, setChannelName] = useState("Voz Conectada");
   const [showPopover, setShowPopover] = useState(false);
 
@@ -46,7 +47,7 @@ export function VoicePanel() {
   useEffect(() => {
     if (channelId && accountId) {
       if (guildId) {
-        const channels = cache.channels[accountId]?.[guildId];
+        const channels = cachedChannels;
         const ch = channels?.find((c) => c.id === channelId);
         if (ch && ch.name) setChannelName(ch.name);
         
@@ -54,7 +55,7 @@ export function VoicePanel() {
         setChannelName("Chamada Direta");
       }
     }
-  }, [channelId, guildId, accountId, cache.channels]);
+  }, [channelId, guildId, accountId, cachedChannels]);
 
   if (!isConnected && !isConnecting) return null;
 

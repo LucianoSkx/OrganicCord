@@ -1,3 +1,5 @@
+import { useShallow } from "zustand/react/shallow";
+import { accountCacheKey } from "@/lib/messageCache";
 import { useEffect, useState, useCallback } from "react";
 import { useDiscordStore } from "@/stores/discordStore";
 import { useNavigationStore } from "@/stores/navigationStore";
@@ -6,6 +8,7 @@ import {
   X, Plus, Tag, Loader2, CheckCircle, AlertCircle
 } from "lucide-react";
 import type { DiscordThread, DiscordForumTag, Reaction } from "@/types";
+import { normalizeReactionEmoji } from "@/lib/emoji";
 import { createForumPost } from "@/lib/tauri";
 
 interface Props {
@@ -33,17 +36,18 @@ function formatForumDate(timestamp?: string) {
 
 // Renderiza o emoji de reação — custom ou unicode
 function ReactionEmoji({ emoji }: { emoji: { id?: string | null; name?: string | null; animated?: boolean } }) {
-  if (emoji.id) {
-    const ext = emoji.animated ? "gif" : "png";
+  const normalized = normalizeReactionEmoji({ id: emoji.id ?? null, name: emoji.name ?? null, animated: emoji.animated });
+  if (normalized.id) {
+    const ext = normalized.animated ? "gif" : "webp";
     return (
       <img
-        src={`https://cdn.discordapp.com/emojis/${emoji.id}.${ext}?quality=lossless`}
-        alt={emoji.name || "emoji"}
+        src={`https://cdn.discordapp.com/emojis/${normalized.id}.${ext}?quality=lossless`}
+        alt={normalized.name || "emoji"}
         style={{ width: 16, height: 16, objectFit: "contain", verticalAlign: "middle", display: "inline-block" }}
       />
     );
   }
-  return <span style={{ fontSize: 14, lineHeight: 1 }}>{emoji.name || "👍"}</span>;
+  return <span style={{ fontSize: 14, lineHeight: 1 }}>{normalized.name || "👍"}</span>;
 }
 
 // Extrai a melhor URL de imagem do thread (attachment ou embed)
@@ -517,8 +521,8 @@ function ForumThreadCard({
 }
 
 export function ForumArea({ channelId, guildId, accountId }: Props) {
-  const { cache, loading, fetchForumThreads } = useDiscordStore();
-  const { setActiveChannel } = useNavigationStore();
+  const { cache, loading, fetchForumThreads } = useDiscordStore(useShallow((s) => ({ cache: s.cache, loading: s.loading, fetchForumThreads: s.fetchForumThreads })));
+  const { setActiveChannel } = useNavigationStore(useShallow((s) => ({ setActiveChannel: s.setActiveChannel })));
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
@@ -534,8 +538,8 @@ export function ForumArea({ channelId, guildId, accountId }: Props) {
     loadThreads();
   }, [loadThreads]);
 
-  const channelThreads: DiscordThread[] = cache.threads[channelId] || [];
-  const guildThreads: DiscordThread[] = cache.threads[guildId] || [];
+  const channelThreads: DiscordThread[] = cache.threads[accountCacheKey(accountId, channelId)] || [];
+  const guildThreads: DiscordThread[] = cache.threads[accountCacheKey(accountId, guildId)] || [];
 
   const allThreadsMap = new Map<string, DiscordThread>();
   for (const t of channelThreads) allThreadsMap.set(t.id, t);
@@ -570,7 +574,7 @@ export function ForumArea({ channelId, guildId, accountId }: Props) {
     );
   }
 
-  const isLoading = loading.threads[channelId];
+  const isLoading = loading.threads[accountCacheKey(accountId, channelId)];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-primary)" }}>

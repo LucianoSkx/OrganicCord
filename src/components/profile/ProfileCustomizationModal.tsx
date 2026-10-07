@@ -1,5 +1,6 @@
 import { AlertCircle, BadgeCheck, Check, Eye, FileText, Image as ImageIcon, Loader2, Palette, Sparkles, Trash2, Upload, UserRound, X, Zap } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
+import { MessageContent } from "@/components/chat/MessageContent";
 import type { StoredAccount } from "@/types";
 
 type Props = {
@@ -67,7 +68,7 @@ export function ProfileCustomizationModal({
             <div className="profile-customization-status"><span /> Disponível</div>
             <div className="profile-customization-sidebar-rule" />
             <span className="profile-customization-eyebrow">SOBRE MIM</span>
-            <p className="profile-customization-bio">{editBio.trim() || "Escreva algo para que as pessoas conheçam você."}</p>
+            <div className="profile-customization-bio"><MessageContent content={editBio.trim() || "Escreva algo para que as pessoas conheçam você."} embed /></div>
             <button type="button" className="profile-customization-message" disabled>
               <UserRound size={16} /> Seu perfil
             </button>
@@ -127,7 +128,7 @@ export function ProfileCustomizationModal({
                   </div>
                   <div className="profile-customization-preview-about">
                     <span className="profile-customization-eyebrow">SOBRE MIM</span>
-                    <p>{editBio.trim() || "Seu texto de apresentação aparecerá aqui."}</p>
+                    <div className="profile-customization-preview-bio"><MessageContent content={editBio.trim() || "Seu texto de apresentação aparecerá aqui."} embed /></div>
                   </div>
                 </div>
               </div>

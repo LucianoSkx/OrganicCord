@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { DiscordChannel, DiscordRole } from "@/types";
 import { useNavigationStore } from "@/stores/navigationStore";
 import { useDiscordStore } from "@/stores/discordStore";
@@ -49,13 +50,12 @@ function HighlightedText({ text, query }: { text: string; query?: string }) {
 export function MessageContent({ content, channels = [], embed = false, highlightQuery }: Props) {
   const accountId = useNavigationStore((s) => s.activeAccountId);
   const guildId = useNavigationStore((s) => s.activeGuildId);
-  const roles = (accountId && guildId) ? useDiscordStore((s) => s.cache.guildRoles?.[accountId]?.[guildId]) : undefined;
+  const roles = useDiscordStore((s) => accountId && guildId ? s.cache.guildRoles?.[accountId]?.[guildId] : undefined);
 
+  const channelMap = useMemo(() => new Map(channels.map((c) => [c.id, c.name ?? c.id])), [channels]);
+  const roleMap = useMemo(() => new Map((roles || []).map((role) => [role.id, role])), [roles]);
+  const nodes = useMemo(() => parseMarkdown(content, channelMap, roleMap), [content, channelMap, roleMap]);
   if (!content) return null;
-  const channelMap = new Map(channels.map((c) => [c.id, c.name ?? c.id]));
-  const roleMap = new Map((roles || []).map((role) => [role.id, role]));
-
-  const nodes = parseMarkdown(content, channelMap, roleMap);
   const jumbo = !embed && isJumboEmoji(nodes);
   return <>{nodes.map((n, i) => renderNode(n, i, jumbo, channelMap, embed, highlightQuery))}</>;
 }

@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import React from "react";
 import { Phone, PhoneOff } from "lucide-react";
 import { useVoiceStore } from "@/stores/voiceStore";
@@ -5,8 +6,8 @@ import { useNavigationStore } from "@/stores/navigationStore";
 import { Avatar } from "@/components/ui/Avatar";
 
 export function IncomingCallWidget() {
-  const { incomingCall, acceptIncomingCall, declineIncomingCall } = useVoiceStore();
-  const { setActiveAccount, setActiveGuild, setActiveChannel, navigateToDMs } = useNavigationStore();
+  const { incomingCall, acceptIncomingCall, declineIncomingCall } = useVoiceStore(useShallow((s) => ({ incomingCall: s.incomingCall, acceptIncomingCall: s.acceptIncomingCall, declineIncomingCall: s.declineIncomingCall })));
+  const { setActiveAccount, setActiveGuild, setActiveChannel, navigateToDMs } = useNavigationStore(useShallow((s) => ({ setActiveAccount: s.setActiveAccount, setActiveGuild: s.setActiveGuild, setActiveChannel: s.setActiveChannel, navigateToDMs: s.navigateToDMs })));
 
   if (!incomingCall) return null;
 

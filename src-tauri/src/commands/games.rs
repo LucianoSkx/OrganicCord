@@ -3,13 +3,19 @@ use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use sysinfo::System;
+use sysinfo::{System, ProcessRefreshKind, UpdateKind};
+use tauri::{Emitter, Manager};
 use tauri::State;
 use tauri_plugin_store::StoreBuilder;
 use uuid::Uuid;
 
 const STORE_FILE: &str = "registered_games.json";
+const LEGACY_RPC_STORE_FILE: &str = "discord_rich_presence.json";
 const DETECTION_DEBOUNCE_MS: i64 = 3_000;
+
+fn enabled_by_default() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -24,6 +30,8 @@ pub struct RegisteredGame {
 #[serde(rename_all = "camelCase")]
 pub struct GameDetectionSettings {
     pub enabled: bool,
+    #[serde(default = "enabled_by_default")]
+    pub publish_enabled: bool,
     pub games: Vec<RegisteredGame>,
 }
 
@@ -31,6 +39,7 @@ impl Default for GameDetectionSettings {
     fn default() -> Self {
         Self {
             enabled: true,
+            publish_enabled: true,
             games: vec![
                 registered("valorant", "VALORANT-Win64-Shipping.exe", "VALORANT"),
                 registered("league-of-legends", "LeagueClient.exe", "League of Legends"),
@@ -75,6 +84,8 @@ struct ObservedGame {
 pub struct GameDetectionManager {
     settings: Arc<Mutex<Option<GameDetectionSettings>>>,
     observed: Arc<Mutex<HashMap<String, ObservedGame>>>,
+    system: Mutex<System>,
+    wake: Arc<tokio::sync::Notify>,
 }
 
 impl GameDetectionManager {
@@ -82,6 +93,8 @@ impl GameDetectionManager {
         Self {
             settings: Arc::new(Mutex::new(None)),
             observed: Arc::new(Mutex::new(HashMap::new())),
+            system: Mutex::new(System::new()),
+            wake: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
@@ -97,12 +110,27 @@ impl GameDetectionManager {
         let store = StoreBuilder::new(app, STORE_FILE)
             .build()
             .map_err(|error| format!("Não foi possível abrir os jogos registrados: {error}"))?;
-        let settings: GameDetectionSettings = store
-            .get("settings")
+        let stored_settings = store.get("settings");
+        let mut settings: GameDetectionSettings = stored_settings
+            .clone()
             .map(|value| serde_json::from_value(value.clone()))
             .transpose()
             .map_err(|error| format!("Não foi possível ler os jogos registrados: {error}"))?
             .unwrap_or_default();
+        if stored_settings
+            .as_ref()
+            .and_then(|value| value.get("publishEnabled"))
+            .is_none()
+        {
+            if let Ok(legacy_store) = StoreBuilder::new(app, LEGACY_RPC_STORE_FILE).build() {
+                if let Some(enabled) = legacy_store
+                    .get("settings")
+                    .and_then(|value| value.get("enabled").and_then(|enabled| enabled.as_bool()))
+                {
+                    settings.publish_enabled = enabled;
+                }
+            }
+        }
         *cached = Some(settings.clone());
         Ok(settings)
     }
@@ -125,6 +153,7 @@ impl GameDetectionManager {
             .settings
             .lock()
             .map_err(|_| "Game settings lock poisoned")? = Some(settings);
+        self.wake.notify_one();
         Ok(())
     }
 
@@ -146,6 +175,17 @@ impl GameDetectionManager {
                 .map_err(|_| "Game detector lock poisoned")?
                 .clear();
         }
+        Ok(settings)
+    }
+
+    pub fn set_publish_enabled(
+        &self,
+        app: &tauri::AppHandle,
+        enabled: bool,
+    ) -> Result<GameDetectionSettings, String> {
+        let mut settings = self.settings(app)?;
+        settings.publish_enabled = enabled;
+        self.save_settings(app, settings.clone())?;
         Ok(settings)
     }
 
@@ -205,11 +245,12 @@ impl GameDetectionManager {
 
     pub fn scan(&self, app: &tauri::AppHandle) -> Result<Option<DetectedGame>, String> {
         let settings = self.settings(app)?;
-        if !settings.enabled {
+        if !settings.enabled || !settings.games.iter().any(|game| game.enabled) {
             self.observed
                 .lock()
                 .map_err(|_| "Game detector lock poisoned")?
                 .clear();
+            *self.system.lock().map_err(|_| "Game process lock poisoned")? = System::new();
             return Ok(None);
         }
 
@@ -220,8 +261,9 @@ impl GameDetectionManager {
             .filter(|game| game.enabled)
             .filter_map(|game| normalize_process_name(&game.executable).map(|key| (key, game)))
             .collect();
-        let mut system = System::new_all();
-        system.refresh_processes();
+        if enabled_games.is_empty() { return Ok(None); }
+        let mut system = self.system.lock().map_err(|_| "Game process lock poisoned")?;
+        system.refresh_processes_specifics(ProcessRefreshKind::new().with_exe(UpdateKind::OnlyIfNotSet));
 
         let mut seen = HashSet::new();
         let mut observed = self
@@ -257,6 +299,8 @@ impl GameDetectionManager {
                     first_seen_at: now,
                     last_seen_at: now,
                 });
+            entry.game.name.clone_from(&registered.name);
+            entry.game.executable.clone_from(&registered.executable);
             entry.last_seen_at = now;
         }
 
@@ -324,6 +368,15 @@ pub fn game_detection_set_enabled(
 }
 
 #[tauri::command]
+pub fn game_detection_set_publish_enabled(
+    enabled: bool,
+    manager: State<'_, GameDetectionManager>,
+    app: tauri::AppHandle,
+) -> Result<GameDetectionSettings, String> {
+    manager.set_publish_enabled(&app, enabled)
+}
+
+#[tauri::command]
 pub fn game_detection_update_game(
     game: RegisteredGame,
     manager: State<'_, GameDetectionManager>,
@@ -342,11 +395,43 @@ pub fn game_detection_remove_game(
 }
 
 #[tauri::command]
-pub fn game_detection_scan(
-    manager: State<'_, GameDetectionManager>,
-    app: tauri::AppHandle,
-) -> Result<Option<DetectedGame>, String> {
-    manager.scan(&app)
+pub async fn game_detection_scan(app: tauri::AppHandle) -> Result<Option<DetectedGame>, String> {
+    tokio::task::spawn_blocking(move || app.state::<GameDetectionManager>().scan(&app))
+        .await.map_err(|error| error.to_string())?
+}
+
+pub fn start_detection_service(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let wake = app.state::<GameDetectionManager>().wake.clone();
+        let mut previous: Option<Option<DetectedGame>> = None;
+        loop {
+            let app_for_scan = app.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                let manager = app_for_scan.state::<GameDetectionManager>();
+                let settings = manager.settings(&app_for_scan)?;
+                let enabled = settings.enabled && settings.games.iter().any(|game| game.enabled);
+                manager.scan(&app_for_scan).map(|game| (enabled, game))
+            }).await;
+            let enabled = match result {
+                Ok(Ok((enabled, game))) => {
+                    if previous.as_ref() != Some(&game) {
+                        let _ = app.emit("game-detection-changed", &game);
+                        previous = Some(game);
+                    }
+                    enabled
+                }
+                _ => true,
+            };
+            if enabled {
+                tokio::select! {
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(3500)) => {},
+                    _ = wake.notified() => {},
+                }
+            } else {
+                wake.notified().await;
+            }
+        }
+    });
 }
 
 #[cfg(test)]

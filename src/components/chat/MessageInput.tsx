@@ -1,3 +1,5 @@
+import { useMediaMemoryGuard } from "@/hooks/useMediaMemoryGuard";
+import { useShallow } from "zustand/react/shallow";
 import { lazy, Suspense, useState, useRef, useCallback, useEffect, useMemo, type KeyboardEvent } from "react";
 import type { DiscordMessage } from "@/types";
 import { getDisplayName } from "@/lib/utils";
@@ -13,6 +15,9 @@ import { toast } from "@/components/ui/Toast";
 import { listen } from "@tauri-apps/api/event";
 import { selectAttachment } from "@/lib/tauri";
 import { invoke } from "@tauri-apps/api/core";
+import { customEmojiCode, listCustomEmojiMatches, parseCustomEmojiToken, resolveEmojiToken, serializeOutgoingEmojiTokens, type CustomEmoji } from "@/lib/emoji";
+import { emojiCatalog } from "@/lib/emoji";
+import type { DiscordEmoji } from "@/types";
 
 const EmojiPickerPanel = lazy(() =>
   import("./EmojiPickerPanel").then((module) => ({ default: module.EmojiPickerPanel })),
@@ -34,20 +39,79 @@ interface Props {
 
 // ─── Helpers de Emoji Customizado ─────────────────────────────────────────────
 
-function parseCustomEmojiTag(str: string): { animated: boolean; name: string; id: string } | null {
-  const match = str.trim().match(/^<(a)?:([^:>]+):(\d+)>$/);
-  if (!match) return null;
-  return {
-    animated: !!match[1],
-    name: match[2],
-    id: match[3],
-  };
+function createEmojiImage(emoji: CustomEmoji): HTMLImageElement {
+  const image = document.createElement("img");
+  image.src = `https://cdn.discordapp.com/emojis/${emoji.id}.${emoji.animated ? "gif" : "webp"}?size=48`;
+  image.dataset.emoji = customEmojiCode(emoji);
+  image.alt = `:${emoji.name}:`;
+  image.title = image.alt;
+  Object.assign(image.style, { width: "22px", height: "22px", verticalAlign: "middle", margin: "0 2px", display: "inline-block", pointerEvents: "none", userSelect: "all" });
+  return image;
 }
 
-function getEmojiImgHTML(animated: boolean, name: string, id: string): string {
-  const fullCode = `<${animated ? "a" : ""}:${name}:${id}>`;
-  const url = `https://cdn.discordapp.com/emojis/${id}.${animated ? "gif" : "webp"}?size=48`;
-  return `<img src="${url}" data-emoji="${fullCode}" alt=":${name}:" title=":${name}:" style="width: 22px; height: 22px; vertical-align: middle; margin: 0 2px; display: inline-block; pointer-events: none; user-select: all;" />`;
+function insertAtCaret(editor: HTMLElement, content: Node): void {
+  const selection = window.getSelection();
+  const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+  if (!range || !editor.contains(range.commonAncestorContainer)) {
+    const last = content instanceof DocumentFragment ? content.lastChild : content;
+    editor.append(content);
+    if (last) {
+      const end = document.createRange();
+      end.setStartAfter(last);
+      end.collapse(true);
+      selection?.removeAllRanges();
+      selection?.addRange(end);
+    }
+    return;
+  }
+  range.deleteContents();
+  const last = content instanceof DocumentFragment ? content.lastChild : content;
+  range.insertNode(content);
+  if (last) {
+    range.setStartAfter(last);
+    range.collapse(true);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+}
+
+function replaceBeforeCaret(editor: HTMLElement, length: number, emoji: CustomEmoji, trailingSpace = false): boolean {
+  const selection = window.getSelection();
+  const node = selection?.anchorNode;
+  const offset = selection?.anchorOffset ?? 0;
+  if (!node || node.nodeType !== Node.TEXT_NODE || !editor.contains(node) || offset < length) return false;
+  const range = document.createRange();
+  range.setStart(node, offset - length);
+  range.setEnd(node, offset);
+  range.deleteContents();
+  const image = createEmojiImage(emoji);
+  range.insertNode(image);
+  if (trailingSpace) {
+    const space = document.createTextNode(" ");
+    image.after(space);
+    range.setStartAfter(space);
+  } else {
+    range.setStartAfter(image);
+  }
+  range.collapse(true);
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  return true;
+}
+
+function emojiFragment(text: string, groups: Record<string, DiscordEmoji[]> | null, guildId: string | null): DocumentFragment {
+  const fragment = document.createDocumentFragment();
+  const pattern = /(<a?:[\w-]+:\d+>|<\d+:[\w-]+:?>|:[\w-]+:)/g;
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    if (index > last) fragment.append(document.createTextNode(text.slice(last, index)));
+    const emoji = resolveEmojiToken(match[0], groups, guildId);
+    fragment.append(emoji ? createEmojiImage(emoji) : document.createTextNode(match[0]));
+    last = index + match[0].length;
+  }
+  if (last < text.length) fragment.append(document.createTextNode(text.slice(last)));
+  return fragment;
 }
 
 function getRawContentFromEditable(el: HTMLElement): string {
@@ -85,6 +149,8 @@ export function MessageInput({
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [attachment, setAttachment] = useState<AttachmentData | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [emojiQuery, setEmojiQuery] = useState("");
+  const [emojiSelection, setEmojiSelection] = useState(0);
   const editorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -93,17 +159,11 @@ export function MessageInput({
     }
   }, [externalAttachment]);
 
-  const { activeAccountId } = useNavigationStore();
+  const { activeAccountId, activeGuildId } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, activeGuildId: s.activeGuildId })));
   const guildEmojisRaw = useDiscordStore((s) => activeAccountId ? s.cache.guildEmojis[activeAccountId] : null);
+  const emojiMatches = useMemo(() => listCustomEmojiMatches(emojiQuery, guildEmojisRaw, activeGuildId), [emojiQuery, guildEmojisRaw, activeGuildId]);
 
-  const customEmojis = useMemo(() => {
-    if (!guildEmojisRaw) return [];
-    return Object.values(guildEmojisRaw).flat().map(e => ({
-      id: e.id || Math.random().toString(),
-      names: e.name ? [e.name] : [],
-      imgUrl: `https://cdn.discordapp.com/emojis/${e.id}.${e.animated ? "gif" : "webp"}?size=48`
-    }));
-  }, [guildEmojisRaw]);
+  const customEmojis = emojiCatalog(guildEmojisRaw);
 
   useEffect(() => {
     const unlisten = listen<{ progress: number }>("upload-progress", (event) => {
@@ -116,6 +176,7 @@ export function MessageInput({
 
   // Audio Recording State
   const [isRecording, setIsRecording] = useState(false);
+  useMediaMemoryGuard("recording", isRecording);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [audioLevels, setAudioLevels] = useState<number[]>([10, 15, 20, 10, 30, 15, 10]);
 
@@ -126,7 +187,18 @@ export function MessageInput({
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
 
-  const cleanupAudioResources = () => {
+  const recordingGeneration = useRef(0);
+  const mounted = useRef(true);
+  const [attachmentPreview, setAttachmentPreview] = useState<string>();
+
+  useEffect(() => {
+    if (attachment?.type !== "file" || !attachment.file.type.startsWith("image/")) { setAttachmentPreview(undefined); return; }
+    const url = URL.createObjectURL(attachment.file);
+    setAttachmentPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [attachment]);
+
+  const cleanupAudioResources = useCallback(() => {
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((track) => track.stop());
       mediaStreamRef.current = null;
@@ -143,9 +215,26 @@ export function MessageInput({
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      recordingGeneration.current += 1;
+      const recorder = mediaRecorderRef.current;
+      if (recorder) {
+        recorder.ondataavailable = null;
+        if (recorder.state !== "inactive") recorder.stop();
+      }
+      mediaRecorderRef.current = null;
+      cleanupAudioResources();
+      audioChunksRef.current = [];
+    };
+  }, [cleanupAudioResources]);
 
   const startRecording = async () => {
+    const generation = ++recordingGeneration.current;
     try {
       cleanupAudioResources();
 
@@ -157,6 +246,10 @@ export function MessageInput({
           channelCount: 1,
         },
       });
+      if (!mounted.current || recordingGeneration.current !== generation) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
       mediaStreamRef.current = stream;
       audioChunksRef.current = [];
 
@@ -200,8 +293,14 @@ export function MessageInput({
         source.connect(analyser);
 
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        const updateLevels = () => {
+        let lastSample = 0;
+        const updateLevels = (time = performance.now()) => {
           if (!mediaStreamRef.current || audioCtx.state === "closed") return;
+          if (time - lastSample < 80 || document.visibilityState !== "visible") {
+            animFrameRef.current = requestAnimationFrame(updateLevels);
+            return;
+          }
+          lastSample = time;
           analyser.getByteFrequencyData(dataArray);
           const sliced = Array.from(dataArray.slice(0, 12)).map((v) => Math.max(10, Math.floor((v / 255) * 28)));
           setAudioLevels(sliced);
@@ -213,11 +312,14 @@ export function MessageInput({
       }
     } catch (err) {
       console.error("[audio] Error accessing microphone:", err);
+      cleanupAudioResources();
+      if (!mounted.current) return;
       toast.error("Não foi possível acessar o microfone. Verifique a privacidade de áudio do Windows.");
     }
   };
 
   const cancelRecording = () => {
+    recordingGeneration.current += 1;
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
     }
@@ -232,6 +334,8 @@ export function MessageInput({
 
     setSending(true);
 
+    const generation = recordingGeneration.current;
+    const destination = { accountId: activeAccountId, channelId, replyId: replyingTo?.id };
     const recorder = mediaRecorderRef.current;
     const finalMime = recorder.mimeType || "audio/ogg";
 
@@ -244,6 +348,7 @@ export function MessageInput({
     });
 
     cleanupAudioResources();
+    if (!mounted.current || recordingGeneration.current !== generation) return;
     setIsRecording(false);
 
     try {
@@ -287,16 +392,16 @@ export function MessageInput({
         }
       }
 
+      if (!mounted.current || recordingGeneration.current !== generation) return;
       await useDiscordStore
         .getState()
-        .sendVoiceMessage(activeAccountId, channelId, audioUint8, durationSecs, base64Waveform, replyingTo?.id);
+        .sendVoiceMessage(destination.accountId, destination.channelId, audioUint8, durationSecs, base64Waveform, destination.replyId);
 
       if (replyingTo) onCancelReply();
     } catch (err) {
       console.error("[audio] Error sending voice message:", err);
     } finally {
-      setSending(false);
-      setRecordingSeconds(0);
+      if (mounted.current) { setSending(false); setRecordingSeconds(0); }
       audioChunksRef.current = [];
     }
   };
@@ -311,13 +416,29 @@ export function MessageInput({
     if (!editorRef.current) return;
     editorRef.current.focus();
 
-    const parsed = parseCustomEmojiTag(emojiStr);
+    const parsed = parseCustomEmojiToken(emojiStr);
     if (parsed) {
-      const html = getEmojiImgHTML(parsed.animated, parsed.name, parsed.id);
-      document.execCommand("insertHTML", false, html + "&nbsp;");
+      const fragment = document.createDocumentFragment();
+      fragment.append(createEmojiImage(parsed), document.createTextNode(" "));
+      insertAtCaret(editorRef.current, fragment);
     } else {
       document.execCommand("insertText", false, emojiStr + " ");
     }
+    setEmojiQuery("");
+    updateStateFromEditable();
+  }, [updateStateFromEditable]);
+
+  const chooseEmojiSuggestion = useCallback((emoji: CustomEmoji) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const selection = window.getSelection();
+    const node = selection?.anchorNode;
+    const beforeCaret = node?.nodeType === Node.TEXT_NODE ? (node.nodeValue ?? "").slice(0, selection?.anchorOffset ?? 0) : "";
+    const token = /:[\w-]*$/.exec(beforeCaret)?.[0];
+    if (token) replaceBeforeCaret(editor, token.length, emoji, true);
+    else insertAtCaret(editor, createEmojiImage(emoji));
+    editor.focus();
+    setEmojiQuery("");
     updateStateFromEditable();
   }, [updateStateFromEditable]);
 
@@ -334,7 +455,11 @@ export function MessageInput({
 
   const handleSend = useCallback(async () => {
     if (!editorRef.current) return;
-    const rawContent = getRawContentFromEditable(editorRef.current).trim();
+    const rawContent = serializeOutgoingEmojiTokens(
+      getRawContentFromEditable(editorRef.current),
+      guildEmojisRaw,
+      activeGuildId,
+    ).trim();
     if ((!rawContent && !attachment) || sending) return;
 
     setSending(true);
@@ -354,7 +479,7 @@ export function MessageInput({
         editorRef.current?.focus();
       }, 0);
     }
-  }, [attachment, sending, onSend]);
+  }, [attachment, sending, onSend, guildEmojisRaw, activeGuildId]);
 
   const lastTypingRef = useRef<number>(0);
 
@@ -363,20 +488,17 @@ export function MessageInput({
     const rawContent = getRawContentFromEditable(editorRef.current);
     setIsEmpty(rawContent.trim().length === 0);
 
-    // Auto-converte códigos de emoji recém-digitados (ex: `<:name:id>`) em imagens inline
-    const html = editorRef.current.innerHTML;
-    const convertedHTML = html.replace(/<(a)?:([^:>]+):(\d+)>/g, (_, animated, name, id) => {
-      return getEmojiImgHTML(!!animated, name, id);
-    });
-    if (convertedHTML !== html) {
-      editorRef.current.innerHTML = convertedHTML;
-      // Posiciona o cursor no final
-      const range = document.createRange();
-      const sel = window.getSelection();
-      range.selectNodeContents(editorRef.current);
-      range.collapse(false);
-      sel?.removeAllRanges();
-      sel?.addRange(range);
+    const selection = window.getSelection();
+    const node = selection?.anchorNode;
+    const beforeCaret = node?.nodeType === Node.TEXT_NODE ? (node.nodeValue ?? "").slice(0, selection?.anchorOffset ?? 0) : "";
+    const completed = /(<a?:[\w-]+:\d+>|<\d+:[\w-]+:?>|:[\w-]+:)$/.exec(beforeCaret)?.[0];
+    const resolved = completed ? resolveEmojiToken(completed, guildEmojisRaw, activeGuildId) : null;
+    if (completed && resolved && replaceBeforeCaret(editorRef.current, completed.length, resolved)) {
+      setEmojiQuery("");
+    } else {
+      const partial = /(?:^|[\s(]):([\w-]{1,32})$/.exec(beforeCaret);
+      setEmojiQuery(partial?.[1] ?? "");
+      setEmojiSelection(0);
     }
 
     if (rawContent.length > 0 && activeAccountId) {
@@ -386,10 +508,27 @@ export function MessageInput({
         invoke("trigger_typing", { accountId: activeAccountId, channelId }).catch(console.error);
       }
     }
-  }, [channelId, activeAccountId]);
+  }, [channelId, activeAccountId, activeGuildId, guildEmojisRaw]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLDivElement>) => {
+      if (emojiMatches.length) {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          setEmojiSelection((index) => (index + (e.key === "ArrowDown" ? 1 : -1) + emojiMatches.length) % emojiMatches.length);
+          return;
+        }
+        if (e.key === "Tab" || e.key === "Enter") {
+          e.preventDefault();
+          chooseEmojiSuggestion(emojiMatches[emojiSelection] ?? emojiMatches[0]);
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setEmojiQuery("");
+          return;
+        }
+      }
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
@@ -398,7 +537,7 @@ export function MessageInput({
         onCancelReply();
       }
     },
-    [handleSend, replyingTo, onCancelReply]
+    [handleSend, replyingTo, onCancelReply, emojiMatches, emojiSelection, chooseEmojiSuggestion]
   );
 
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLDivElement>) => {
@@ -414,15 +553,13 @@ export function MessageInput({
       return;
     }
 
-    // Cola texto sem formatação HTML estranha e auto-converte emojis
+    // Paste as DOM nodes so escaped tags and arbitrary text stay safe.
     e.preventDefault();
     const text = e.clipboardData.getData("text/plain");
-    const convertedHTML = text.replace(/<(a)?:([^:>]+):(\d+)>/g, (_, animated, name, id) => {
-      return getEmojiImgHTML(!!animated, name, id);
-    });
-    document.execCommand("insertHTML", false, convertedHTML);
+    if (editorRef.current) insertAtCaret(editorRef.current, emojiFragment(text, guildEmojisRaw, activeGuildId));
+    setEmojiQuery("");
     updateStateFromEditable();
-  }, [updateStateFromEditable]);
+  }, [updateStateFromEditable, guildEmojisRaw, activeGuildId]);
 
   const handleAttachClick = async () => {
     if (!canAttach) {
@@ -530,7 +667,7 @@ export function MessageInput({
           >
             {(attachment.type === "file" && attachment.file.type.startsWith("image/")) ? (
               <img
-                src={URL.createObjectURL(attachment.file)}
+                src={attachmentPreview}
                 alt="attachment"
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
@@ -737,9 +874,15 @@ export function MessageInput({
               <div
                 ref={editorRef}
                 contentEditable={!sending}
+                role="textbox"
+                aria-label="Mensagem"
+                aria-multiline="true"
+                aria-autocomplete="list"
+                aria-expanded={emojiMatches.length > 0}
                 onInput={handleInput}
                 onKeyDown={handleKeyDown}
                 onPaste={handlePaste}
+                onBlur={() => setEmojiQuery("")}
                 style={{
                   width: "100%",
                   minHeight: 24,
@@ -754,6 +897,24 @@ export function MessageInput({
                   whiteSpace: "pre-wrap",
                 }}
               />
+              {emojiMatches.length > 0 && (
+                <div role="listbox" aria-label="Sugestões de emoji" style={{ position: "absolute", bottom: "100%", left: 0, width: "min(320px, 100%)", maxHeight: 270, overflowY: "auto", padding: 5, background: "var(--bg-floating)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-sm)", boxShadow: "var(--elevation-high)", zIndex: 20 }}>
+                  {emojiMatches.map((emoji, index) => (
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={emojiSelection === index}
+                      key={emoji.id}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => chooseEmojiSuggestion(emoji)}
+                      style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", padding: "7px 9px", border: 0, borderRadius: "var(--radius-sm)", background: emojiSelection === index ? "var(--bg-modifier-hover)" : "transparent", color: "var(--text-normal)", textAlign: "left", cursor: "pointer" }}
+                    >
+                      <img src={`https://cdn.discordapp.com/emojis/${emoji.id}.${emoji.animated ? "gif" : "webp"}?size=32`} alt="" style={{ width: 24, height: 24, objectFit: "contain" }} />
+                      :{emoji.name}:
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 6, marginBottom: 6 }}>

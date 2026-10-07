@@ -29,6 +29,12 @@ export default defineConfig(async () => ({
         codeSplitting: {
           groups: [
             {
+              name: "emoji-picker",
+              test: /node_modules[\\/](emoji-picker-react)[\\/]/,
+              includeDependenciesRecursively: false,
+              priority: 25,
+            },
+            {
               name: "react-vendor",
               test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/,
               priority: 30,
@@ -51,7 +57,8 @@ export default defineConfig(async () => ({
             {
               name: "vendor",
               test: /node_modules[\\/]/,
-              maxSize: 250_000,
+              // Splitting this dependency graph by size separated react-redux
+              // initialization from drag-and-drop and produced a startup cycle.
               priority: 10,
             },
           ],

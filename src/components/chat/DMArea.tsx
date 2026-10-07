@@ -1,3 +1,5 @@
+import { useShallow } from "zustand/react/shallow";
+import { useChannelMessages } from "@/hooks/useChannelMessages";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useDiscordStore } from "@/stores/discordStore";
 import { useAccountStore } from "@/stores/accountStore";
@@ -13,7 +15,6 @@ import { SearchResultsSidebar } from "./SearchResultsSidebar";
 import { TypingIndicator } from "./TypingIndicator";
 import { ChatDropOverlay } from "./ChatDropOverlay";
 import { toast } from "@/components/ui/Toast";
-import { getMessages } from "@/lib/tauri";
 
 interface Props {
   channelId: string;
@@ -21,21 +22,19 @@ interface Props {
 }
 
 export function DMArea({ channelId, accountId }: Props) {
-  const { cache, loading, fetchMessages, fetchMoreMessages, sendMessage, fetchDMs, deleteMessage } =
-    useDiscordStore();
-  const { accounts } = useAccountStore();
-  const { joinCall, leaveCall, isConnecting, isConnected, channelId: voiceChannelId } = useVoiceStore();
+  const { fetchMoreMessages, sendMessage, deleteMessage, fetchDMs } = useDiscordStore(useShallow((s) => ({ fetchMoreMessages: s.fetchMoreMessages, sendMessage: s.sendMessage, deleteMessage: s.deleteMessage, fetchDMs: s.fetchDMs })));
+  const { messages, isLoading } = useChannelMessages(accountId, channelId);
+  const { accounts } = useAccountStore(useShallow((s) => ({ accounts: s.accounts })));
+  const { joinCall, leaveCall, isConnecting, isConnected, channelId: voiceChannelId } = useVoiceStore(useShallow((s) => ({ joinCall: s.joinCall, leaveCall: s.leaveCall, isConnecting: s.isConnecting, isConnected: s.isConnected, channelId: s.channelId })));
   const [replyingTo, setReplyingTo] = useState<DiscordMessage | null>(null);
   const [searchQuery, setSearchQuery] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [pendingAttachment, setPendingAttachment] = useState<AttachmentData | null>(null);
   const dragCounterRef = useRef(0);
 
-  const messages = cache.messages[channelId] ?? [];
-  const isLoading = loading.messages[channelId];
   const account = accounts.find((a) => a.id === accountId);
 
-  const dms = cache.dms[accountId] ?? [];
+  const dms = useDiscordStore((s) => s.cache.dms[accountId]) ?? [];
   const dm = dms.find((d) => d.id === channelId);
   const recipient = dm?.recipients?.[0];
   const targetName = recipient?.global_name || recipient?.username || "DM";
@@ -83,46 +82,12 @@ export function DMArea({ channelId, accountId }: Props) {
     }
   };
 
-  // Initial load
   useEffect(() => {
-    if (!cache.messages[channelId]) fetchMessages(accountId, channelId);
-    if (!cache.dms[accountId]) fetchDMs(accountId);
-    useDiscordStore.getState().clearUnread(accountId, channelId);
+    if (!useDiscordStore.getState().cache.dms[accountId]) void fetchDMs(accountId);
+    void useDiscordStore.getState().clearUnread(accountId, channelId);
     setSearchQuery(null);
     setPendingAttachment(null);
-  }, [channelId, accountId]);
-
-  // Polling de contingência para recuperar eventos perdidos durante reconexões.
-  useEffect(() => {
-    const poll = async () => {
-      const existing = useDiscordStore.getState().cache.messages[channelId];
-      const newestReal = existing?.find((m) => !m.id.startsWith("local-"));
-      if (!newestReal) return;
-      try {
-        const fresh = await getMessages(accountId, channelId, undefined, newestReal.id);
-        if (fresh.length === 0) return;
-
-        useDiscordStore.setState((s) => {
-          const cur = s.cache.messages[channelId] ?? [];
-          const realIds = new Set(cur.filter((m) => !m.id.startsWith("local-")).map((m) => m.id));
-          const toAdd = fresh.filter((m) => !realIds.has(m.id));
-          if (toAdd.length === 0) return s;
-
-          const freshFingerprints = new Set(fresh.map((m) => `${m.author.id}:${m.content.trim()}`));
-          const dedupedCur = cur.filter(
-            (m) => !m.id.startsWith("local-") || !freshFingerprints.has(`${m.author.id}:${m.content.trim()}`)
-          );
-          const sorted = [...toAdd].sort((a, b) => (BigInt(b.id) > BigInt(a.id) ? 1 : -1));
-          return { cache: { ...s.cache, messages: { ...s.cache.messages, [channelId]: [...sorted, ...dedupedCur] } } };
-        });
-      } catch (e) {
-        console.warn("[DM poll] erro:", e);
-      }
-    };
-
-    const interval = setInterval(poll, 3000);
-    return () => clearInterval(interval);
-  }, [channelId, accountId]);
+  }, [channelId, accountId, fetchDMs]);
 
   const handleSend = useCallback(async (content: string, attachment?: AttachmentData) => {
     if (!accountId || !channelId) return;
@@ -295,6 +260,7 @@ export function DMArea({ channelId, accountId }: Props) {
         <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
           <div style={{ flex: 1, overflow: "hidden" }}>
             <MessageList
+              key={`${accountId}:${channelId}`}
               messages={messages}
               isLoading={isLoading}
               currentUserId={account?.user_id ?? ""}
@@ -304,9 +270,10 @@ export function DMArea({ channelId, accountId }: Props) {
             />
           </div>
 
-          <TypingIndicator channelId={channelId} />
+          <TypingIndicator accountId={accountId} channelId={channelId} />
 
           <MessageInput
+          key={`${accountId}:${channelId}`}
             channelId={channelId}
             replyingTo={replyingTo}
             onCancelReply={() => setReplyingTo(null)}

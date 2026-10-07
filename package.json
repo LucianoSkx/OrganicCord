@@ -1,6 +1,6 @@
 {
   "name": "organic-cord",
-  "version": "0.2.0-beta.2",
+  "version": "0.3.0-beta.1",
   "private": true,
   "engines": {
     "node": ">=24 <25"
@@ -16,6 +16,8 @@
     "lint": "eslint src --max-warnings 0",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
+    "test:browser": "playwright test",
+    "test:production": "node scripts/check-production.mjs",
     "build:public": "npm run tauri:build",
     "prepare": "husky"
   },
@@ -46,6 +48,7 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tauri-apps/cli": "^2.1.0",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",

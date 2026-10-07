@@ -10,6 +10,17 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message};
 use zeroize::Zeroizing;
 
+fn presence_key(value: &Value) -> Option<String> {
+    value["user"]["id"].as_str().or_else(|| value["user_id"].as_str()).map(str::to_string)
+}
+
+fn generic_dispatch_needed(event: &str) -> bool {
+    !matches!(event, "READY" | "READY_SUPPLEMENTAL" | "RESUMED" | "MESSAGE_CREATE" |
+        "PRESENCE_UPDATE" | "GUILD_MEMBER_LIST_UPDATE" | "GUILD_CREATE" |
+        "TYPING_START" | "RELATIONSHIP_ADD" | "RELATIONSHIP_UPDATE" | "RELATIONSHIP_REMOVE" |
+        "VOICE_STATE_UPDATE" | "VOICE_SERVER_UPDATE" | "STREAM_CREATE" | "STREAM_SERVER_UPDATE")
+}
+
 // ─── Gateway opcodes ─────────────────────────────────────────────────────────
 
 const OP_DISPATCH: u8 = 0;
@@ -157,7 +168,7 @@ pub struct GatewayHandle {
 
 pub struct GatewayManager {
     handles: Arc<Mutex<HashMap<String, GatewayHandle>>>,
-    pub cached_presences: Arc<Mutex<HashMap<String, Vec<Value>>>>,
+    pub cached_presences: Arc<Mutex<HashMap<String, HashMap<String, Value>>>>,
 }
 
 fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -369,6 +380,7 @@ impl GatewayManager {
             let mut handles = lock_recover(&self.handles);
             handles.remove(account_id)
         };
+        lock_recover(&self.cached_presences).remove(account_id);
         if let Some(h) = handle {
             let _ = h.tx.send(GatewayCommand::Disconnect).await;
             h.task.abort();
@@ -389,7 +401,7 @@ async fn gateway_task(
     mut cmd_rx: mpsc::Receiver<GatewayCommand>,
     app: Option<tauri::AppHandle>,
     account_id: String,
-    cached_presences: Arc<Mutex<HashMap<String, Vec<Value>>>>,
+    cached_presences: Arc<Mutex<HashMap<String, HashMap<String, Value>>>>,
     presence: Arc<Mutex<GatewayPresence>>,
 ) {
     let mut backoff = 1u64;
@@ -467,7 +479,18 @@ async fn gateway_task(
                 backoff = (backoff * 2).min(max_backoff);
             }
             GatewayExit::ReconnectNow(reason) => {
-                log::info!("[gateway] {reason} — reconnecting immediately");
+                // A server-requested reconnect can repeat during an incident. Bound the
+                // retry pace so one account does not send Identify/Resume in a tight loop.
+                log::info!("[gateway] {reason} — reconnecting in {backoff}s");
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(backoff)) => {}
+                    cmd = cmd_rx.recv() => {
+                        if matches!(cmd, Some(GatewayCommand::Disconnect) | None) {
+                            break 'reconnect;
+                        }
+                    }
+                }
+                backoff = (backoff * 2).min(max_backoff);
             }
             GatewayExit::Fatal(error) => {
                 log::error!("[gateway] fatal session error: {error}");
@@ -499,9 +522,22 @@ enum GatewayExit {
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{
-        activity_payload, gateway_heartbeat_payload, CustomActivity, GameActivity, GatewayPresence,
+        activity_payload, gateway_heartbeat_payload, generic_dispatch_needed, presence_key, CustomActivity, GameActivity, GatewayPresence,
         PresenceStatus,
     };
+
+    #[test]
+    fn dedicated_events_are_not_duplicated_but_call_and_message_changes_are_delivered() {
+        for event in ["MESSAGE_CREATE", "PRESENCE_UPDATE", "VOICE_STATE_UPDATE", "VOICE_SERVER_UPDATE", "TYPING_START"] {
+            assert!(!generic_dispatch_needed(event));
+        }
+        for event in ["CALL_CREATE", "CALL_UPDATE", "CALL_DELETE", "MESSAGE_UPDATE", "MESSAGE_DELETE", "MESSAGE_REACTION_ADD", "CHANNEL_UPDATE"] {
+            assert!(generic_dispatch_needed(event));
+        }
+        assert_eq!(presence_key(&serde_json::json!({"user":{"id":"one"}})), Some("one".into()));
+        assert_eq!(presence_key(&serde_json::json!({"user_id":"two"})), Some("two".into()));
+        assert_eq!(presence_key(&serde_json::json!({})), None);
+    }
 
     #[test]
     fn user_gateway_qos_heartbeat_includes_rtc_reason_and_sequence() {
@@ -546,7 +582,7 @@ async fn run_gateway_session(
     cmd_rx: &mut mpsc::Receiver<GatewayCommand>,
     app: &Option<tauri::AppHandle>,
     account_id: &str,
-    cached_presences: &Arc<Mutex<HashMap<String, Vec<Value>>>>,
+    cached_presences: &Arc<Mutex<HashMap<String, HashMap<String, Value>>>>,
     session_id: &mut Option<String>,
     resume_gateway_url: &mut Option<String>,
     sequence: &mut Option<u64>,
@@ -698,13 +734,15 @@ async fn run_gateway_session(
                             }
                             OP_DISPATCH => {
                                 let t = payload["t"].as_str().unwrap_or("");
-                                if let Some(app_handle) = app {
+                                if generic_dispatch_needed(t) {
+                                  if let Some(app_handle) = app {
                                     use tauri::Emitter;
                                     let _ = app_handle.emit("gateway-dispatch", json!({
                                         "account_id": account_id,
                                         "event_type": t,
                                         "data": payload["d"],
                                     }));
+                                }
                                 }
                                 if t == "READY" {
                                     log::info!("[gateway] READY received");
@@ -752,7 +790,7 @@ async fn run_gateway_session(
                                         if let Some(presences) = payload["d"]["presences"].as_array() {
                                             {
                                                 let mut cache = lock_recover(cached_presences);
-                                                cache.insert(account_id.to_string(), presences.clone());
+                                                cache.insert(account_id.to_string(), presences.iter().filter_map(|p| presence_key(p).map(|id| (id, p.clone()))).collect());
                                             }
                                             let event_payload = json!({
                                                 "account_id": account_id,
@@ -798,7 +836,7 @@ async fn run_gateway_session(
                                                 {
                                                     let mut cache = lock_recover(cached_presences);
                                                     let entry = cache.entry(account_id.to_string()).or_default();
-                                                    entry.extend(all_presences.clone());
+                                                    entry.extend(all_presences.iter().filter_map(|p| presence_key(p).map(|id| (id, p.clone()))));
                                                 }
                                                 let event_payload = serde_json::json!({
                                                     "account_id": account_id,
@@ -865,14 +903,7 @@ async fn run_gateway_session(
                                         if !user_id.is_empty() {
                                             let mut cache = lock_recover(cached_presences);
                                             let list = cache.entry(account_id.to_string()).or_default();
-                                            if let Some(pos) = list.iter().position(|p| {
-                                                let pid = p["user"]["id"].as_str().or_else(|| p["user_id"].as_str()).unwrap_or("");
-                                                pid == user_id
-                                            }) {
-                                                list[pos] = payload["d"].clone();
-                                            } else {
-                                                list.push(payload["d"].clone());
-                                            }
+                                            list.insert(user_id.to_string(), payload["d"].clone());
                                         }
                                     }
                                     use tauri::Emitter;

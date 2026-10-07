@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useEffect, useState } from "react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { useNavigationStore } from "@/stores/navigationStore";
@@ -21,14 +22,17 @@ export function GuildSidebar({ onAddAccount }: GuildSidebarProps) {
     activeAccountId, activeGuildId, setActiveGuild, setView, view, 
     navigateToDMs, guildFolders, toggleFolder, loadFolders,
     guildOrder, reorderGuilds, combineGuildsIntoFolder, setGuildOrder
-  } = useNavigationStore();
-  const { cache, loading, fetchGuilds } = useDiscordStore();
-  const { sessions } = useAccountStore();
+  } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, activeGuildId: s.activeGuildId, setActiveGuild: s.setActiveGuild, setView: s.setView, view: s.view, navigateToDMs: s.navigateToDMs, guildFolders: s.guildFolders, toggleFolder: s.toggleFolder, loadFolders: s.loadFolders, guildOrder: s.guildOrder, reorderGuilds: s.reorderGuilds, combineGuildsIntoFolder: s.combineGuildsIntoFolder, setGuildOrder: s.setGuildOrder })));
+  const fetchGuilds = useDiscordStore((s) => s.fetchGuilds);
+  const cachedGuilds = useDiscordStore((s) => activeAccountId ? s.cache.guilds[activeAccountId] : undefined);
+  const unreads = useDiscordStore((s) => activeAccountId ? s.cache.unreads[activeAccountId] : undefined);
+  const loadingGuilds = useDiscordStore((s) => activeAccountId ? s.loading.guilds[activeAccountId] : false);
+  const { sessions } = useAccountStore(useShallow((s) => ({ sessions: s.sessions })));
 
-  const guilds = activeAccountId ? (cache.guilds[activeAccountId] ?? []) : [];
+  const guilds = activeAccountId ? (cachedGuilds ?? []) : [];
   const folders = activeAccountId ? (guildFolders[activeAccountId] ?? []) : [];
   const order = activeAccountId ? (guildOrder[activeAccountId] ?? []) : [];
-  const isLoading = activeAccountId ? loading.guilds[activeAccountId] : false;
+  const isLoading = activeAccountId ? loadingGuilds : false;
 
   // Reconcile order array with actual guilds
   const orderedGuildIds = new Set<string>();
@@ -58,7 +62,7 @@ export function GuildSidebar({ onAddAccount }: GuildSidebarProps) {
     if (
       activeAccountId &&
       sessions[activeAccountId]?.status === "Connected" &&
-      (!cache.guilds[activeAccountId] || cache.guilds[activeAccountId].length === 0)
+      (!cachedGuilds || cachedGuilds.length === 0)
     ) {
       fetchGuilds(activeAccountId);
     }
@@ -125,11 +129,11 @@ export function GuildSidebar({ onAddAccount }: GuildSidebarProps) {
                     if (folderGuilds.length === 0) return null;
 
                     const hasUnreadFolder = folderGuilds.some(g => {
-                      const guildUnreads = Object.values(cache.unreads[activeAccountId!] || {}).filter(u => u.guildId === g.id);
+                      const guildUnreads = Object.values(unreads || {}).filter(u => u.guildId === g.id);
                       return guildUnreads.some(u => u.count > 0);
                     });
                     const folderMentionCount = folderGuilds.reduce((sum, g) => {
-                      const guildUnreads = Object.values(cache.unreads[activeAccountId!] || {}).filter(u => u.guildId === g.id);
+                      const guildUnreads = Object.values(unreads || {}).filter(u => u.guildId === g.id);
                       return sum + guildUnreads.reduce((s, u) => s + u.mentions, 0);
                     }, 0);
 
@@ -185,7 +189,7 @@ export function GuildSidebar({ onAddAccount }: GuildSidebarProps) {
                             {folder.isExpanded && (
                               <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "center", width: "100%", paddingLeft: 4 }}>
                                 {folderGuilds.map(guild => {
-                                  const guildUnreads = Object.values(cache.unreads[activeAccountId!] || {}).filter(u => u.guildId === guild.id);
+                                  const guildUnreads = Object.values(unreads || {}).filter(u => u.guildId === guild.id);
                                   const hasUnread = guildUnreads.some(u => u.count > 0);
                                   const mentionCount = guildUnreads.reduce((sum, u) => sum + u.mentions, 0);
                                   const isMuted = useNotificationStore.getState().isGuildMuted(guild.id);
@@ -224,7 +228,7 @@ export function GuildSidebar({ onAddAccount }: GuildSidebarProps) {
                   const guild = guilds.find(g => g.id === id);
                   if (!guild) return null;
 
-                  const guildUnreads = Object.values(cache.unreads[activeAccountId!] || {}).filter(u => u.guildId === guild.id);
+                  const guildUnreads = Object.values(unreads || {}).filter(u => u.guildId === guild.id);
                   const hasUnread = guildUnreads.some(u => u.count > 0);
                   const mentionCount = guildUnreads.reduce((sum, u) => sum + u.mentions, 0);
                   const isMuted = useNotificationStore.getState().isGuildMuted(guild.id);

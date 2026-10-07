@@ -1,6 +1,7 @@
 mod commands;
 mod gateway;
 mod http_client;
+mod performance;
 mod rate_limit;
 mod session;
 mod storage;
@@ -146,6 +147,7 @@ pub fn run() {
         .manage(commands::voice::VoiceManager::new())
         .manage(commands::stream::StreamManager::new())
         .manage(rate_limit::RateLimiter::new())
+        .manage(performance::MemoryPolicy::default())
         .invoke_handler(tauri::generate_handler![
             commands::account::add_account,
             commands::account::remove_account,
@@ -170,6 +172,8 @@ pub fn run() {
             commands::attachments::select_attachment,
             commands::attachments::select_profile_image,
             commands::discord::send_voice_message,
+            commands::discord::send_attachment_bytes,
+            commands::discord::send_voice_bytes,
             commands::discord::get_dms,
             commands::discord::create_dm,
             commands::discord::start_dm_call,
@@ -200,6 +204,8 @@ pub fn run() {
             commands::window::maximize_window,
             commands::window::close_window,
             commands::window::focus_window,
+            commands::window::exit_app,
+            performance::set_webview_media_active,
             commands::qr_login::start_qr_login,
             commands::qr_login::cancel_qr_login,
             commands::discord::discord_add_reaction,
@@ -212,6 +218,7 @@ pub fn run() {
             commands::presence::gateway_set_game_activity,
             commands::games::game_detection_get_settings,
             commands::games::game_detection_set_enabled,
+            commands::games::game_detection_set_publish_enabled,
             commands::games::game_detection_update_game,
             commands::games::game_detection_remove_game,
             commands::games::game_detection_scan,
@@ -249,6 +256,7 @@ pub fn run() {
             window.set_decorations(false)?;
             #[cfg(target_os = "windows")]
             configure_main_webview_permissions(&window)?;
+            commands::games::start_detection_service(app.handle().clone());
 
             let open_i = MenuItem::with_id(app, "open", "Abrir", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
@@ -264,9 +272,16 @@ pub fn run() {
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => {
-                        app.exit(0);
+                        use tauri::Emitter;
+                        let _ = app.emit("app-before-quit", ());
+                        let fallback = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                            fallback.exit(0);
+                        });
                     }
                     "open" => {
+                        performance::restore(app);
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
@@ -282,6 +297,7 @@ pub fn run() {
                     } = event
                     {
                         if let Some(window) = tray.app_handle().get_webview_window("main") {
+                            performance::restore(tray.app_handle());
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
@@ -292,9 +308,15 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let _ = window.hide();
                 api.prevent_close();
+            }
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(true)) {
+                performance::window_changed(window.app_handle());
             }
         })
         .run(tauri::generate_context!());

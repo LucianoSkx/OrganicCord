@@ -1,5 +1,6 @@
 import type { Embed } from "@/types";
 import { MessageContent } from "./MessageContent";
+import { MediaPreview } from "./MediaPreview";
 import { Play } from "lucide-react";
 import { useExternalLinkStore } from "@/stores/externalLinkStore";
 
@@ -104,7 +105,7 @@ function EmbedCard({ embed }: { embed: Embed }) {
             }}
             style={{ position: "relative", display: "block", borderRadius: 8, overflow: "hidden", aspectRatio: "16/9", width: "100%", background: "#000", cursor: "pointer" }}
           >
-            <img src={mediaUrl} alt={embed.title} style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.9 }} />
+            <img loading="lazy" decoding="async" src={mediaUrl} alt={embed.title} style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.9 }} />
             <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: 48, height: 48, background: "rgba(0,0,0,0.6)", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Play size={24} color="white" fill="white" style={{ marginLeft: 4 }} />
             </div>
@@ -131,7 +132,7 @@ function EmbedCard({ embed }: { embed: Embed }) {
       {embed.author && (
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {embed.author.icon_url && (
-            <img
+            <img loading="lazy" decoding="async"
               src={embed.author.icon_url}
               alt=""
               style={{ width: 18, height: 18, borderRadius: "50%" }}
@@ -204,7 +205,7 @@ function EmbedCard({ embed }: { embed: Embed }) {
         </div>
 
         {embed.thumbnail && (
-          <img
+          <img loading="lazy" decoding="async"
             src={embed.thumbnail.url}
             alt=""
             style={{
@@ -260,10 +261,15 @@ function EmbedCard({ embed }: { embed: Embed }) {
 
       {/* Image */}
       {embed.image && (
-        <img
+        <MediaPreview
           src={embed.image.url}
+          proxyUrl={embed.image.proxy_url}
+          previewWidth={488} previewHeight={300}
           alt=""
           style={{
+            aspectRatio: embed.image.width && embed.image.height ? `${embed.image.width} / ${embed.image.height}` : undefined,
+            width: embed.image.width && embed.image.height ? Math.min(488, embed.image.width, 300 * embed.image.width / embed.image.height) : undefined,
+            height: "auto",
             maxWidth: "100%",
             maxHeight: 300,
             borderRadius: "var(--radius-sm)",
@@ -278,7 +284,7 @@ function EmbedCard({ embed }: { embed: Embed }) {
       {embed.footer && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
           {embed.footer.icon_url && (
-            <img
+            <img loading="lazy" decoding="async"
               src={embed.footer.icon_url}
               alt=""
               style={{ width: 16, height: 16, borderRadius: "50%" }}

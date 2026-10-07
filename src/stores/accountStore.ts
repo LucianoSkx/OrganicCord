@@ -1,3 +1,4 @@
+import { useMessageAudioStore } from "./messageAudioStore";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
@@ -98,6 +99,8 @@ export const useAccountStore = create<AccountState>()(
         try {
           await api.gatewayDisconnect(accountId).catch(() => {});
           await api.removeAccount(accountId);
+          useDiscordStore.getState().clearCache(accountId);
+          if (useMessageAudioStore.getState().accountId === accountId) useMessageAudioStore.getState().stop();
           set((s) => {
             s.accounts = s.accounts.filter((a) => a.id !== accountId);
             delete s.sessions[accountId];

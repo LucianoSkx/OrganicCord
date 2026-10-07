@@ -1,3 +1,5 @@
+import { useShallow } from "zustand/react/shallow";
+import { accountCacheKey } from "@/lib/messageCache";
 import { useState, useEffect } from "react";
 import * as Popover from "@radix-ui/react-popover";
 import { Pin } from "lucide-react";
@@ -10,8 +12,8 @@ import type { DiscordChannel } from "@/types";
 
 export function PinnedMessagesPopover({ channels }: { channels?: DiscordChannel[] }) {
   const [open, setOpen] = useState(false);
-  const { activeAccountId, activeChannelId } = useNavigationStore();
-  const { cache, fetchPinnedMessages, unpinMessage } = useDiscordStore();
+  const { activeAccountId, activeChannelId } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, activeChannelId: s.activeChannelId })));
+  const { cache, fetchPinnedMessages, unpinMessage } = useDiscordStore(useShallow((s) => ({ cache: s.cache, fetchPinnedMessages: s.fetchPinnedMessages, unpinMessage: s.unpinMessage })));
 
   useEffect(() => {
     if (open && activeAccountId && activeChannelId) {
@@ -19,15 +21,15 @@ export function PinnedMessagesPopover({ channels }: { channels?: DiscordChannel[
     }
   }, [open, activeAccountId, activeChannelId, fetchPinnedMessages]);
 
-  const pins = activeChannelId ? cache.pinnedMessages[activeChannelId] || [] : [];
+  const pins = activeChannelId ? cache.pinnedMessages[accountCacheKey(activeAccountId!, activeChannelId)] || [] : [];
 
   const handleUnpin = (messageId: string) => {
     if (activeAccountId && activeChannelId) {
       unpinMessage(activeAccountId, activeChannelId, messageId);
       // Opcional: remover da UI instantaneamente para melhor UX
       useDiscordStore.setState((s) => {
-        if (s.cache.pinnedMessages[activeChannelId]) {
-          s.cache.pinnedMessages[activeChannelId] = s.cache.pinnedMessages[activeChannelId].filter(m => m.id !== messageId);
+        if (s.cache.pinnedMessages[accountCacheKey(activeAccountId!, activeChannelId)]) {
+          s.cache.pinnedMessages[accountCacheKey(activeAccountId!, activeChannelId)] = s.cache.pinnedMessages[accountCacheKey(activeAccountId!, activeChannelId)].filter(m => m.id !== messageId);
         }
       });
     }

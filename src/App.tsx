@@ -1,4 +1,10 @@
+import { flushAppStore } from "@/lib/appStore";
+import { invoke } from "@tauri-apps/api/core";
+import { useMediaMemoryGuard } from "@/hooks/useMediaMemoryGuard";
+import { useMessageAudioStore } from "@/stores/messageAudioStore";
+import { accountCacheKey } from "@/lib/messageCache";
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { listen } from "@tauri-apps/api/event";
 import { initNotificationSystem, triggerDesktopNotification } from "@/lib/notifications";
 import { useAccountStore } from "@/stores/accountStore";
@@ -50,8 +56,18 @@ interface GatewayDispatchData extends Partial<DiscordMessage>, Partial<DiscordMe
 }
 
 export default function App() {
-  const { accounts, loadAccounts, connectAll, toggleStealth } = useAccountStore();
-  const { setActiveAccount, focusedImage, setFocusedImage } = useNavigationStore();
+  const voiceMediaActive = useVoiceStore((s) => s.isConnected || s.isConnecting || !!s.incomingCall);
+  const messageMediaActive = useMessageAudioStore((s) => s.playing);
+  useMediaMemoryGuard("voice", voiceMediaActive);
+  useMediaMemoryGuard("message-audio", messageMediaActive);
+  useEffect(() => {
+    const stop = listen("app-before-quit", () => {
+      void flushAppStore().finally(() => invoke("exit_app")).catch(console.error);
+    });
+    return () => { void stop.then((unlisten) => unlisten()); };
+  }, []);
+  const { accounts, loadAccounts, connectAll, toggleStealth } = useAccountStore(useShallow((s) => ({ accounts: s.accounts, loadAccounts: s.loadAccounts, connectAll: s.connectAll, toggleStealth: s.toggleStealth })));
+  const { activeAccountId, setActiveAccount, focusedImage, setFocusedImage } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, setActiveAccount: s.setActiveAccount, focusedImage: s.focusedImage, setFocusedImage: s.setFocusedImage })));
   const [initializing, setInitializing] = useState(true);
   const [showAddAccount, setShowAddAccount] = useState(false);
 
@@ -73,8 +89,9 @@ export default function App() {
   useEffect(() => {
     const unlistenMessagePromise = listen<{ account_id: string; message: DiscordMessage }>("gateway-message", (event) => {
       const { account_id, message } = event.payload;
+      if (!useAccountStore.getState().accounts.some((account) => account.id === account_id)) return;
       if (message && message.channel_id) {
-        useDiscordStore.getState().prependMessage(message.channel_id, message);
+        useDiscordStore.getState().prependMessage(account_id, message.channel_id, message);
         
         const activeChannelId = useNavigationStore.getState().activeChannelId;
         const activeAccountId = useNavigationStore.getState().activeAccountId;
@@ -159,8 +176,9 @@ export default function App() {
 
     const unlistenTypingPromise = listen<{ account_id: string; typing: GatewayTypingEvent }>("gateway-typing-start", (event) => {
       const { typing } = event.payload;
-      if (typing && typing.channel_id && typing.user_id) {
-        useDiscordStore.getState().addTypingUser(typing.channel_id, typing.user_id, typing.timestamp * 1000, typing.member);
+      if (event.payload.account_id && typing?.channel_id && typing.user_id && Number.isFinite(typing.timestamp) && typing.timestamp > 0) {
+        // Use local receipt time for expiry so device clock skew cannot hide a fresh event.
+        useDiscordStore.getState().addTypingUser(event.payload.account_id, typing.channel_id, typing.user_id, Date.now(), typing.member);
       }
     });
 
@@ -174,25 +192,26 @@ export default function App() {
       switch (eventType) {
         case "MESSAGE_UPDATE":
           if (data.channel_id && data.id) {
-            store.updateMessageFromGateway(data.channel_id, { ...data, id: data.id });
+            store.updateMessageFromGateway(account_id, data.channel_id, { ...data, id: data.id });
           }
           break;
         case "MESSAGE_DELETE":
-          if (data?.channel_id && data?.id) store.removeMessageFromGateway(data.channel_id, data.id);
+          if (data?.channel_id && data?.id) store.removeMessageFromGateway(account_id, data.channel_id, data.id);
           break;
         case "MESSAGE_DELETE_BULK":
           if (data.channel_id && Array.isArray(data.ids)) {
             const channelId = data.channel_id;
-            data.ids.forEach((id) => store.removeMessageFromGateway(channelId, id));
+            data.ids.forEach((id) => store.removeMessageFromGateway(account_id, channelId, id));
           }
           break;
         case "MESSAGE_REACTION_ADD":
         case "MESSAGE_REACTION_REMOVE":
           if (data?.channel_id && data?.message_id && data?.emoji) {
             store.applyGatewayReaction(
+              account_id,
               data.channel_id,
               data.message_id,
-              { id: data.emoji.id ?? null, name: data.emoji.name ?? "" },
+              { id: data.emoji.id ?? null, name: data.emoji.name ?? "", animated: data.emoji.animated === true },
               eventType === "MESSAGE_REACTION_ADD",
               data.user_id === currentUserId
             );
@@ -200,9 +219,9 @@ export default function App() {
           break;
         case "MESSAGE_REACTION_REMOVE_ALL": {
           if (!data.channel_id || !data.message_id) break;
-          const message = store.cache.messages[data.channel_id]?.find((item) => item.id === data.message_id);
+          const message = store.cache.messages[accountCacheKey(account_id, data.channel_id)]?.find((item) => item.id === data.message_id);
           if (message) {
-            store.updateMessageFromGateway(data.channel_id, { id: message.id, reactions: [] });
+            store.updateMessageFromGateway(account_id, data.channel_id, { id: message.id, reactions: [] });
           }
           break;
         }
@@ -335,6 +354,7 @@ export default function App() {
       message?: string;
     }>("gateway-status", (event) => {
       const { account_id, status, message } = event.payload;
+      useGameActivityStore.getState().onGatewayStatus(account_id, status);
       if (status === "connected") {
         useAccountStore.getState().setSessionStatus(account_id, "Connected");
       } else if (status === "reconnecting") {
@@ -383,24 +403,21 @@ export default function App() {
     }
   }, [initializing]);
 
-  // The detector itself runs in Rust. Polling keeps the browser layer small;
-  // Rich Presence is published to whichever account is open in Discord Desktop.
   useEffect(() => {
     if (initializing) return;
-    let disposed = false;
-    const refreshGameActivity = async () => {
-      if (!disposed) {
-        await useGameActivityStore.getState().refreshAndSync();
-      }
-    };
-    void refreshGameActivity();
-    const timer = window.setInterval(() => void refreshGameActivity(), 3_500);
+    const unlisten = listen<import("@/lib/tauri").DetectedGame | null>("game-detection-changed", (event) => {
+      void useGameActivityStore.getState().refreshAndSync(event.payload);
+    });
+    void useGameActivityStore.getState().refreshAndSync();
     return () => {
-      disposed = true;
-      window.clearInterval(timer);
+      void unlisten.then((stop) => stop());
       void useGameActivityStore.getState().clearPublishedActivity();
     };
   }, [initializing]);
+
+  useEffect(() => {
+    if (!initializing) void useGameActivityStore.getState().refreshAndSync();
+  }, [activeAccountId, initializing]);
 
   // Keybinds Globais
   useEffect(() => {
@@ -439,7 +456,7 @@ export default function App() {
       const activeChannelId = useNavigationStore.getState().activeChannelId;
       const activeAccountId = useNavigationStore.getState().activeAccountId;
       if (activeChannelId && activeAccountId) {
-        const msgs = useDiscordStore.getState().cache.messages[activeChannelId];
+        const msgs = useDiscordStore.getState().cache.messages[accountCacheKey(activeAccountId, activeChannelId)];
         const newestReal = msgs?.find(m => !m.id.startsWith("local-"));
         if (newestReal) {
           useDiscordStore.getState().clearUnread(activeAccountId, activeChannelId, newestReal.id);

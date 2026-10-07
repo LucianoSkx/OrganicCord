@@ -42,8 +42,8 @@ impl BucketState {
         }
     }
 
-    /// Advance window if expired, then check if we can proceed.
-    fn can_proceed(&mut self, window_secs: u64) -> bool {
+    /// Check availability without consuming a slot. Both limits must allow a request first.
+    fn available(&mut self, window_secs: u64) -> bool {
         let now = Instant::now();
 
         // If there's a retry_after lock, wait
@@ -60,12 +60,11 @@ impl BucketState {
             self.reset_at = now + Duration::from_secs(window_secs);
         }
 
-        if self.remaining > 0 {
-            self.remaining -= 1;
-            true
-        } else {
-            false
-        }
+        self.remaining > 0
+    }
+
+    fn consume(&mut self) {
+        self.remaining -= 1;
     }
 
     /// Wait duration before next request is allowed.
@@ -148,40 +147,47 @@ impl RateLimiter {
             let wait = {
                 let mut state = self.state.lock().await;
                 let now = Instant::now();
-                if let Some(until) = state.global_retry_after {
-                    if now < until {
-                        Some(until - now)
-                    } else {
+                let global_wait = match state.global_retry_after {
+                    Some(until) if now < until => until - now,
+                    Some(_) => {
                         state.global_retry_after = None;
-                        None
+                        Duration::ZERO
                     }
+                    None => Duration::ZERO,
+                };
+                if global_wait > Duration::ZERO {
+                    global_wait
                 } else {
-                    None
-                }
-                .or_else(|| {
-                    if state.global.can_proceed(1) {
-                        None
-                    } else {
-                        Some(state.global.wait_duration())
-                    }
-                })
-                .unwrap_or_else(|| {
                     let resolved = state
                         .route_to_bucket
                         .get(bucket)
                         .cloned()
                         .unwrap_or_else(|| bucket.to_string());
-                    let bucket_state = state
-                        .buckets
-                        .entry(resolved)
-                        .or_insert_with(|| BucketState::new(limit, window_secs));
-
-                    if bucket_state.can_proceed(window_secs) {
+                    let (bucket_ready, bucket_wait) = {
+                        let bucket_state = state
+                            .buckets
+                            .entry(resolved.clone())
+                            .or_insert_with(|| BucketState::new(limit, window_secs));
+                        (
+                            bucket_state.available(window_secs),
+                            bucket_state.wait_duration(),
+                        )
+                    };
+                    let global_ready = state.global.available(1);
+                    if bucket_ready && global_ready {
+                        state
+                            .buckets
+                            .get_mut(&resolved)
+                            .expect("bucket exists")
+                            .consume();
+                        state.global.consume();
                         Duration::ZERO
+                    } else if !bucket_ready {
+                        bucket_wait
                     } else {
-                        bucket_state.wait_duration()
+                        state.global.wait_duration()
                     }
-                })
+                }
             };
 
             if wait == Duration::ZERO {
@@ -285,7 +291,7 @@ impl RateLimiter {
 
 /// Rate-limit aware GET with full 429 handling including Retry-After.
 pub async fn rate_limited_get<T>(
-    client: &reqwest::Client,
+    client: &crate::http_client::DiscordClient,
     rl: &RateLimiter,
     url: &str,
     bucket: &str,
@@ -356,7 +362,7 @@ where
 
 /// Rate-limit aware POST JSON with full 429 handling.
 pub async fn rate_limited_post<T>(
-    client: &reqwest::Client,
+    client: &crate::http_client::DiscordClient,
     rl: &RateLimiter,
     url: &str,
     body: &serde_json::Value,
@@ -419,7 +425,7 @@ where
 
 /// Rate-limit aware DELETE with full 429 handling.
 pub async fn rate_limited_delete(
-    client: &reqwest::Client,
+    client: &crate::http_client::DiscordClient,
     rl: &RateLimiter,
     url: &str,
     bucket: &str,
@@ -467,7 +473,7 @@ pub async fn rate_limited_delete(
 
 /// Rate-limit aware PATCH with full 429 handling.
 pub async fn rate_limited_patch<T>(
-    client: &reqwest::Client,
+    client: &crate::http_client::DiscordClient,
     rl: &RateLimiter,
     url: &str,
     body: &serde_json::Value,
@@ -530,7 +536,7 @@ where
 
 /// Rate-limit aware PATCH for endpoints where the response body is irrelevant.
 pub async fn rate_limited_patch_empty(
-    client: &reqwest::Client,
+    client: &crate::http_client::DiscordClient,
     rl: &RateLimiter,
     url: &str,
     body: &serde_json::Value,
@@ -584,7 +590,7 @@ pub async fn rate_limited_patch_empty(
 
 /// Rate-limit aware PUT with full 429 handling, returns raw success bool.
 pub async fn rate_limited_put_empty(
-    client: &reqwest::Client,
+    client: &crate::http_client::DiscordClient,
     rl: &RateLimiter,
     url: &str,
     body: Option<&serde_json::Value>,
@@ -635,7 +641,7 @@ pub async fn rate_limited_put_empty(
 
 /// Rate-limit aware POST for endpoints that return no JSON body.
 pub async fn rate_limited_post_empty(
-    client: &reqwest::Client,
+    client: &crate::http_client::DiscordClient,
     rl: &RateLimiter,
     url: &str,
     body: Option<&serde_json::Value>,
@@ -711,4 +717,28 @@ pub mod limits {
     pub const INVITE_CREATE: (u32, u64) = (3, 10);
     /// Pin/unpin: 5 per 5 seconds
     pub const PIN: (u32, u64) = (5, 5);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RateLimiter;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn waiting_for_route_does_not_consume_global_capacity() {
+        let limiter = Arc::new(RateLimiter::new());
+        limiter.acquire("route", 1, 60).await;
+
+        let pending = {
+            let limiter = limiter.clone();
+            tokio::spawn(async move { limiter.acquire("route", 1, 60).await })
+        };
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let state = limiter.state.lock().await;
+        assert_eq!(state.global.remaining, 49);
+        drop(state);
+        pending.abort();
+    }
 }

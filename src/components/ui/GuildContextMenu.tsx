@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import { FolderPlus, Folder, BellOff, Bell, ChevronRight } from "lucide-react";
 import { useNavigationStore } from "@/stores/navigationStore";
@@ -9,7 +10,7 @@ interface GuildContextMenuProps {
 }
 
 export function GuildContextMenu({ children, guildId }: GuildContextMenuProps) {
-  const { activeAccountId, guildFolders, createFolder, moveGuildToFolder } = useNavigationStore();
+  const { activeAccountId, guildFolders, createFolder, moveGuildToFolder } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, guildFolders: s.guildFolders, createFolder: s.createFolder, moveGuildToFolder: s.moveGuildToFolder })));
   const { isGuildMuted, muteGuild, unmuteGuild } = useNotificationStore();
 
   const folders = activeAccountId ? (guildFolders[activeAccountId] || []) : [];

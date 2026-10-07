@@ -325,8 +325,9 @@ export function AppearanceSettings() {
 
         {/* Cozy vs Compact */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <div
+          <button type="button"
             onClick={() => updateSetting("displayMode", "cozy")}
+            aria-pressed={settings.displayMode === "cozy"}
             style={{
               background: "var(--bg-secondary)",
               border: settings.displayMode === "cozy" ? "2px solid var(--brand-500)" : "1px solid var(--border-subtle)",
@@ -337,15 +338,17 @@ export function AppearanceSettings() {
               flexDirection: "column",
               gap: 8,
               position: "relative",
+              textAlign: "left",
             }}
           >
             <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-normal)" }}>Achegado (Padrão)</div>
-            <div style={{ fontSize: 13, color: "var(--text-muted)" }}>Moderne com avatares e exibição completa.</div>
+            <div style={{ fontSize: 13, color: "var(--text-muted)" }}>Avatares e mensagens em blocos.</div>
             {settings.displayMode === "cozy" && <ActiveBadge />}
-          </div>
+          </button>
 
-          <div
+          <button type="button"
             onClick={() => updateSetting("displayMode", "compact")}
+            aria-pressed={settings.displayMode === "compact"}
             style={{
               background: "var(--bg-secondary)",
               border: settings.displayMode === "compact" ? "2px solid var(--brand-500)" : "1px solid var(--border-subtle)",
@@ -356,12 +359,13 @@ export function AppearanceSettings() {
               flexDirection: "column",
               gap: 8,
               position: "relative",
+              textAlign: "left",
             }}
           >
             <div style={{ fontSize: 15, fontWeight: 600, color: "var(--text-normal)" }}>Compacto (Estilo IRC)</div>
-            <div style={{ fontSize: 13, color: "var(--text-muted)" }}>Agrupa mensagens sem repetir avatares.</div>
+            <div style={{ fontSize: 13, color: "var(--text-muted)" }}>Uma linha por mensagem, sem avatares.</div>
             {settings.displayMode === "compact" && <ActiveBadge />}
-          </div>
+          </button>
         </div>
 
         {/* Tamanho da Fonte */}
@@ -389,13 +393,13 @@ export function AppearanceSettings() {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "var(--text-normal)", fontWeight: 500 }}>
             <span>Espaçamento entre Grupos de Mensagens</span>
-            <span>{settings.messageSpacing || 16}px</span>
+            <span>{settings.messageSpacing ?? 16}px</span>
           </div>
           <input
             type="range"
             min="0"
             max="24"
-            value={settings.messageSpacing || 16}
+            value={settings.messageSpacing ?? 16}
             onChange={(e) => updateSetting("messageSpacing", parseInt(e.target.value))}
             style={{ width: "100%", cursor: "pointer", accentColor: "var(--brand-500)" }}
           />
