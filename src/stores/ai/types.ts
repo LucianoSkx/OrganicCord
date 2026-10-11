@@ -1,5 +1,4 @@
-export type AiConfig = any;
-export type AiMessage = any;
+import type { AiConfig } from "@/stores/aiStore";
 
 export type ConversationStatus = "idle" | "running" | "paused" | "error" | "generating";
 
@@ -87,7 +86,7 @@ export interface AiConversationStore {
   removeConversation: (id: string) => void;
   startConversation: (id: string) => void;
   stopConversation: (id: string) => void;
-  addLog: (log: any) => void;
+  addLog: (log: ConvLogEntry) => void;
   clearLogs: (id: string) => void;
   _setInfo: (convId: string, patch: Partial<ConvRuntimeInfo>) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- logs aceitam campos livres
