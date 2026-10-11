@@ -360,7 +360,7 @@ function buildDirectiveInstruction(
 
 // ─── Conversation thread summarizer (for context injection) ──────────────────
 
-function buildThreadSummary(channelMsgs: ChannelMessage[], participantUserId: string): string {
+function buildThreadSummary(channelMsgs: ChannelMessage[], _participantUserId: string): string {
   if (channelMsgs.length === 0) return "";
 
   const recent = channelMsgs.slice(-8);

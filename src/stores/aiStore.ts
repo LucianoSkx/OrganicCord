@@ -89,10 +89,7 @@ interface AiStore {
   ) => void;
 }
 
-export const OPENROUTER_MODELS: any[] = [];
-export const GOOGLE_MODELS: any[] = [];
-
-export const useAiStore = create<AiStore>()((set) => ({
+export const useAiStore = create<AiStore>()((_set) => ({
   rules: [],
   dmRules: [],
   globalConfig: null,

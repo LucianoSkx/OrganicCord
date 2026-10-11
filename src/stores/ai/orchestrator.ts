@@ -161,6 +161,15 @@ function buildOrchestratorUserPrompt(
 
 // ─── JSON parser (resilient) ──────────────────────────────────────────────────
 
+const ORCHESTRATOR_TONES = ["casual", "provocative", "curious", "skeptical", "hyped"] as const;
+
+function orchestratorTone(value: unknown): OrchestratorDirective["tone"] {
+  const tone = typeof value === "string" ? value : "";
+  return (ORCHESTRATOR_TONES as readonly string[]).includes(tone)
+    ? (tone as OrchestratorDirective["tone"])
+    : "casual";
+}
+
 function parseDirective(raw: string): OrchestratorDirective | null {
   try {
     // Strip markdown code blocks if model wrapped it
@@ -179,9 +188,7 @@ function parseDirective(raw: string): OrchestratorDirective | null {
       action,
       subject: (typeof parsed.subject === "string" && parsed.subject.trim()) ? parsed.subject.trim() : "assunto atual",
       leader: typeof parsed.leader === "string" ? parsed.leader : undefined,
-      tone: (["casual", "provocative", "curious", "skeptical", "hyped"] as const).includes(parsed.tone as any)
-        ? (parsed.tone as OrchestratorDirective["tone"])
-        : "casual",
+      tone: orchestratorTone(parsed.tone),
       raw: typeof parsed.raw === "string" ? parsed.raw : `${action}: ${parsed.subject ?? ""}`,
     };
   } catch {

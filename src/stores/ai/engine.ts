@@ -3,7 +3,7 @@ import { useDiscordStore } from "@/stores/discordStore";
 import { getSelfProfile } from "@/lib/tauri";
 import type {
   AiParticipant, AiConversation, RuntimeState, ChannelMessage,
-  AiConversationStore, ConvLogEntry, ConvRuntimeInfo,
+  AiConversationStore, ConvLogEntry,
 } from "./types";
 import { defaultInfo, makeRuntime } from "./types";
 import type { AiConfig } from "@/stores/aiStore";
@@ -1102,7 +1102,6 @@ export async function runOneTurn(
   }
 
   // ── Generate main turn (with optional parallel) ───────────────────────────
-  const doBurst = Math.random() < 0.65;
   const forceSingle = mentionMsg != null;
 
   // Compute turn-level signals once (shared by primary + parallel participant)

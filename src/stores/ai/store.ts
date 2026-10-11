@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { AiConversationStore } from "./types";
 
-export const useAiConversationStore = create<AiConversationStore>()((set) => ({
+export const useAiConversationStore = create<AiConversationStore>()((_set) => ({
   conversations: [],
   runtimeInfo: {},
   runtimeStatus: {},
