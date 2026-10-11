@@ -110,7 +110,7 @@ export function RegisteredGamesSettings() {
       <section style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div>
           <h3 style={{ color: "var(--text-normal)", fontSize: 16, fontWeight: 650 }}>Cadastrar outro jogo</h3>
-          <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>Informe o nome exibido e o arquivo do processo (por exemplo, <code>meu-jogo.exe</code>). O jogo só será detectado enquanto esse programa estiver aberto.</p>
+          <p style={{ marginTop: 4, color: "var(--text-muted)", fontSize: 13 }}>Informe o nome exibido e o arquivo do processo (por exemplo, <code>meu-jogo.exe</code> no Windows ou <code>cs2</code> no Linux). O jogo só será detectado enquanto esse programa estiver aberto.</p>
         </div>
         <form onSubmit={addGame} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) auto", gap: 8 }}>
           <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Nome exibido" aria-label="Nome exibido do jogo" maxLength={128} style={inputStyle} />

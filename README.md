@@ -3,7 +3,7 @@
   OrganicCord
 </h1>
 
-An open-source, lightweight, multi-account desktop client for Discord on Windows. OrganicCord brings conversations, communities, voice, presence, and notifications into a focused native desktop experience built with Tauri, Rust, React, and TypeScript.
+An open-source, lightweight, multi-account desktop client for Discord. OrganicCord brings conversations, communities, voice, presence, and notifications into a focused native desktop experience built with Tauri, Rust, React, and TypeScript. Windows is the reference platform; a Linux build is also available (see [Install on Linux](#install-on-linux-experimental)).
 
 > [!WARNING]
 > OrganicCord is an **unofficial** Discord client. Discord does not provide a public, supported API for complete user clients, so service changes can affect compatibility. Do not use this project for account automation, spam, data harvesting, or self-bots. Keep the official Discord client available for important accounts.
@@ -23,7 +23,7 @@ OrganicCord is currently published as [`v0.3.0-beta.1`](https://github.com/aMath
 | Messages, DMs, servers, friends, and presence | Video calls |
 | Voice calls in DMs and voice channels | Screen sharing / Go Live |
 | Attachments, reactions, replies, polls, and forums | Activities, soundboard, and Stage Channels |
-| Native notifications, themes, shortcuts, and multi-account sessions | Automatic updates and official Linux/macOS support |
+| Native notifications, themes, shortcuts, and multi-account sessions | Automatic updates and official macOS support |
 
 ## Install on Windows
 
@@ -42,6 +42,16 @@ Get-FileHash .\OrganicCord_0.3.0-beta.1_x64-setup.exe -Algorithm SHA256
 ```text
 4ED50107A54324694462F48CA2AFCF374838EA6AE075C90B458EF30059A00FED
 ```
+
+## Install on Linux (experimental)
+
+The Linux build produces a `.deb` and an `AppImage`. Voice, gateway, attachments, notifications, multi-account, and the login webview are functional; game detection also matches Linux/Proton processes. Screen sharing is not available on any platform yet.
+
+1. Install `OrganicCord_0.3.0-beta.1_amd64.deb` (or run the `AppImage`).
+2. Keep the desktop portal stack available for notifications and the tray icon. The tray needs `libayatana-appindicator` / `libappindicator-gtk3`; without it the app still starts, just without the tray.
+3. Rich Presence via `discord_ipc` works when Discord Desktop runs on the same machine (it exposes the same IPC over Unix sockets).
+
+Diagnostic logs go to `$XDG_STATE_HOME/OrganicCord/logs` (`$HOME/.local/state/OrganicCord/logs` by default). If the system keyring (secret-service/KWallet) is unavailable, the encryption key falls back to a file restricted to the user (`$XDG_DATA_HOME/OrganicCord/encryption_key`, mode `0600`), and the app logs a warning on startup.
 
 ## What you can do
 
@@ -88,7 +98,7 @@ Discord API v10 · Gateway · Voice Gateway
 | Layer | Responsibility |
 | --- | --- |
 | React + Zustand | Interface, navigation, message cache, and call state. |
-| Tauri | Typed bridge between the frontend and native Windows capabilities. |
+| Tauri | Typed bridge between the frontend and native OS capabilities. |
 | Rust | Sessions, REST, Gateway handling, rate limits, permissions, audio, and attachment handling. |
 | Gateway v10 | Real-time events, heartbeats, reconnection, and session resume. |
 | Voice | Opus, audio devices, encrypted RTP transport, and fail-closed DAVE negotiation. |
@@ -99,7 +109,7 @@ Permissions are evaluated across server, role, member, and channel overrides. Re
 
 - The frontend does not receive or persist Discord account tokens.
 - Local credentials are encrypted, with keys protected by the operating system.
-- Files selected in Windows become opaque, temporary identifiers with expiration and size limits before they are uploaded.
+- Files selected on disk become opaque, temporary identifiers with expiration and size limits before they are uploaded.
 - The Content Security Policy restricts script, connection, media, and embedded-navigation origins.
 - External links are validated and require confirmation before the default browser is opened.
 
@@ -109,10 +119,21 @@ These measures reduce the attack surface, but do not eliminate the risks inheren
 
 ### Requirements
 
-- Windows 10 or 11 with WebView2;
-- Node.js 24 (`>=24 <25`);
-- Rust `1.89.0` MSVC, pinned in [`rust-toolchain`](rust-toolchain);
-- Visual Studio C++ Build Tools for the audio backend.
+Platform-specific; the Rust toolchain is pinned in [`rust-toolchain`](rust-toolchain).
+
+- **Windows**: Windows 10 or 11 with WebView2, and Visual Studio C++ Build Tools for the audio backend;
+- **Linux**: `libwebkit2gtk-4.1`, `libgtk-3`, `librsvg`, `libasound2` and `patchelf` for building; `libayatana-appindicator3` / `libappindicator-gtk3` for the tray icon;
+- **Both**: Node.js 24 (`>=24 <25`) and Rust `1.89.0`.
+
+```bash
+# Debian/Ubuntu
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev patchelf
+
+# Arch
+sudo pacman -S webkit2gtk-4.1 base-devel curl wget file openssl \
+  xdotool libayatana-appindicator librsvg alsa-lib patchelf
+```
 
 ### Run locally
 
@@ -120,6 +141,14 @@ These measures reduce the attack surface, but do not eliminate the risks inheren
 npm ci
 npm run tauri:dev
 ```
+
+Bundle for the current platform (Windows produces the NSIS installer, Linux produces `.deb` and `AppImage`):
+
+```bash
+npm run tauri:build
+```
+
+On some distributions linuxdeploy ships an old `strip` that fails on `RELR` sections; build the AppImage with `NO_STRIP=1 npm run tauri:build -- --bundles appimage`.
 
 ### Validate the project
 

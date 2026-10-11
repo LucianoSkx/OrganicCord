@@ -317,19 +317,73 @@ async fn connect_and_handshake(application_id: &str) -> Result<RpcClient, String
     ))
 }
 
-#[cfg(not(target_os = "windows"))]
-type RpcClient = ();
+/// O Discord Desktop expõe o mesmo protocolo IPC em socket Unix, variando o
+/// diretório entre sessão normal, Flatpak e Snap.
+#[cfg(unix)]
+type RpcClient = tokio::net::UnixStream;
 
-#[cfg(not(target_os = "windows"))]
-async fn connect_and_handshake(_application_id: &str) -> Result<RpcClient, String> {
-    Err(
-        "A publicação por RPC está disponível nesta versão do OrganicCord para Windows."
-            .to_string(),
-    )
+#[cfg(unix)]
+fn rpc_socket_candidates() -> Vec<std::path::PathBuf> {
+    let mut directories: Vec<std::path::PathBuf> = Vec::new();
+    for variable in ["XDG_RUNTIME_DIR", "TMPDIR"] {
+        if let Some(value) = std::env::var_os(variable) {
+            let path = std::path::PathBuf::from(value);
+            if path.is_absolute() && !directories.contains(&path) {
+                directories.push(path);
+            }
+        }
+    }
+
+    let mut paths = Vec::new();
+    for directory in directories {
+        for index in 0..10 {
+            paths.push(directory.join(format!("discord-ipc-{index}")));
+            paths.push(directory.join("app").join(format!("discord-ipc-{index}")));
+        }
+    }
+    paths
 }
 
-#[cfg(target_os = "windows")]
-async fn write_frame(client: &mut RpcClient, opcode: u32, payload: &Value) -> Result<(), String> {
+#[cfg(unix)]
+async fn connect_and_handshake(application_id: &str) -> Result<RpcClient, String> {
+    let mut last_error = None;
+    for path in rpc_socket_candidates() {
+        match tokio::net::UnixStream::connect(&path).await {
+            Ok(mut client) => {
+                let handshake = json!({ "v": 1, "client_id": application_id });
+                write_frame(&mut client, RPC_HANDSHAKE, &handshake).await?;
+                let (opcode, payload) = read_frame(&mut client).await?;
+                if opcode == RPC_CLOSE {
+                    return Err(rpc_error_message(&payload));
+                }
+                if opcode != RPC_FRAME || payload["evt"].as_str() != Some("READY") {
+                    return Err("O Discord Desktop recusou a conexão de Rich Presence.".to_string());
+                }
+                return Ok(client);
+            }
+            Err(error) => last_error = Some(error),
+        }
+    }
+    let detail = last_error
+        .map(|error| format!(": {error}"))
+        .unwrap_or_default();
+    Err(format!(
+        "Não foi possível encontrar o Discord Desktop aberto{detail}"
+    ))
+}
+
+#[cfg(not(any(target_os = "windows", unix)))]
+type RpcClient = ();
+
+#[cfg(not(any(target_os = "windows", unix)))]
+async fn connect_and_handshake(_application_id: &str) -> Result<RpcClient, String> {
+    Err("A publicação por RPC não é compatível com este sistema.".to_string())
+}
+
+async fn write_frame<C>(client: &mut C, opcode: u32, payload: &Value) -> Result<(), String>
+where
+    C: tokio::io::AsyncWrite + Unpin,
+{
     use tokio::io::AsyncWriteExt;
 
     let body = serde_json::to_vec(payload)
@@ -354,20 +408,10 @@ async fn write_frame(client: &mut RpcClient, opcode: u32, payload: &Value) -> Re
     })
 }
 
-#[cfg(not(target_os = "windows"))]
-async fn write_frame(
-    _client: &mut RpcClient,
-    _opcode: u32,
-    _payload: &Value,
-) -> Result<(), String> {
-    Err(
-        "A publicação por RPC está disponível nesta versão do OrganicCord para Windows."
-            .to_string(),
-    )
-}
-
-#[cfg(target_os = "windows")]
-async fn read_frame(client: &mut RpcClient) -> Result<(u32, Value), String> {
+async fn read_frame<C>(client: &mut C) -> Result<(u32, Value), String>
+where
+    C: tokio::io::AsyncRead + Unpin,
+{
     use tokio::io::AsyncReadExt;
 
     let mut header = [0_u8; 8];
@@ -388,14 +432,6 @@ async fn read_frame(client: &mut RpcClient) -> Result<(u32, Value), String> {
     let payload = serde_json::from_slice(&body)
         .map_err(|_| "O Discord Desktop enviou uma resposta inválida.".to_string())?;
     Ok((opcode, payload))
-}
-
-#[cfg(not(target_os = "windows"))]
-async fn read_frame(_client: &mut RpcClient) -> Result<(u32, Value), String> {
-    Err(
-        "A publicação por RPC está disponível nesta versão do OrganicCord para Windows."
-            .to_string(),
-    )
 }
 
 async fn wait_for_response(client: &mut RpcClient, nonce: &str) -> Result<(), String> {

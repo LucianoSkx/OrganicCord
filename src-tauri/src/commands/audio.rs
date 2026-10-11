@@ -10,12 +10,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
 use std::sync::Mutex as StdMutex;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, watch};
 
@@ -381,20 +381,32 @@ impl StereoLinearResampler {
 
 #[cfg(test)]
 fn input_to_stereo<T>(data: &[T], channels: usize) -> Vec<f32>
-where T: Sample + Copy, f32: FromSample<T> {
+where
+    T: Sample + Copy,
+    f32: FromSample<T>,
+{
     let mut output = Vec::new();
     input_to_stereo_into(data, channels, &mut output);
     output
 }
 
 fn input_to_stereo_into<T>(data: &[T], channels: usize, output: &mut Vec<f32>)
-where T: Sample + Copy, f32: FromSample<T> {
+where
+    T: Sample + Copy,
+    f32: FromSample<T>,
+{
     output.clear();
-    if channels == 0 { return; }
+    if channels == 0 {
+        return;
+    }
     output.reserve((data.len() / channels) * 2);
     for frame in data.chunks_exact(channels) {
         let left = f32::from_sample(frame[0]);
-        let right = if channels > 1 { f32::from_sample(frame[1]) } else { left };
+        let right = if channels > 1 {
+            f32::from_sample(frame[1])
+        } else {
+            left
+        };
         output.extend_from_slice(&[left, right]);
     }
 }
@@ -503,7 +515,9 @@ where
                     if is_speaking {
                         is_speaking = false;
                         silence_frames = 0;
-                        if let Some(tx) = &speaking_sender { let _ = tx.send(false); }
+                        if let Some(tx) = &speaking_sender {
+                            let _ = tx.send(false);
+                        }
                     }
                     return;
                 }
@@ -512,7 +526,9 @@ where
                 pcm_buffer.extend_from_slice(&resampled);
 
                 while pcm_buffer.len() >= 1_920 {
-                    for (target, sample) in frame.iter_mut().zip(pcm_buffer.drain(..1_920)) { *target = sample; }
+                    for (target, sample) in frame.iter_mut().zip(pcm_buffer.drain(..1_920)) {
+                        *target = sample;
+                    }
                     let is_muted = muted.load(Ordering::Relaxed);
                     if is_muted {
                         if is_speaking {
@@ -735,7 +751,10 @@ where
                 if muted {
                     sources.clear();
                 } else {
-                    sources.retain(|_, queue| !queue.samples.is_empty() || queue.last_packet.elapsed() < Duration::from_secs(2));
+                    sources.retain(|_, queue| {
+                        !queue.samples.is_empty()
+                            || queue.last_packet.elapsed() < Duration::from_secs(2)
+                    });
                 }
             },
             move |error| log::error!("[audio] Erro no stream de saída: {error}"),
@@ -1266,8 +1285,8 @@ mod transport_tests {
 #[cfg(test)]
 mod tests {
     use super::{
-        input_to_stereo, rnnoise_output_to_stereo, rtp_transport_layout,
-        stereo_to_rnnoise_input, StereoLinearResampler, RNNOISE_FRAME_SIZE,
+        input_to_stereo, rnnoise_output_to_stereo, rtp_transport_layout, stereo_to_rnnoise_input,
+        StereoLinearResampler, RNNOISE_FRAME_SIZE,
     };
 
     #[test]

@@ -4,6 +4,9 @@ import { AiConversationStore } from "./types";
 export const useAiConversationStore = create<AiConversationStore>()((set) => ({
   conversations: [],
   runtimeInfo: {},
+  runtimeStatus: {},
+  runtimeError: {},
+  runtimeRounds: {},
   addConversation: () => {},
   updateConversation: () => {},
   removeConversation: () => {},
@@ -12,4 +15,6 @@ export const useAiConversationStore = create<AiConversationStore>()((set) => ({
   addLog: () => {},
   clearLogs: () => {},
   _setInfo: () => {},
+  _pushLog: () => {},
+  _startCountdown: () => {},
 }));

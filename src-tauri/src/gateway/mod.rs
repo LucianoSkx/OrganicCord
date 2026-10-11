@@ -11,14 +11,31 @@ use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message};
 use zeroize::Zeroizing;
 
 fn presence_key(value: &Value) -> Option<String> {
-    value["user"]["id"].as_str().or_else(|| value["user_id"].as_str()).map(str::to_string)
+    value["user"]["id"]
+        .as_str()
+        .or_else(|| value["user_id"].as_str())
+        .map(str::to_string)
 }
 
 fn generic_dispatch_needed(event: &str) -> bool {
-    !matches!(event, "READY" | "READY_SUPPLEMENTAL" | "RESUMED" | "MESSAGE_CREATE" |
-        "PRESENCE_UPDATE" | "GUILD_MEMBER_LIST_UPDATE" | "GUILD_CREATE" |
-        "TYPING_START" | "RELATIONSHIP_ADD" | "RELATIONSHIP_UPDATE" | "RELATIONSHIP_REMOVE" |
-        "VOICE_STATE_UPDATE" | "VOICE_SERVER_UPDATE" | "STREAM_CREATE" | "STREAM_SERVER_UPDATE")
+    !matches!(
+        event,
+        "READY"
+            | "READY_SUPPLEMENTAL"
+            | "RESUMED"
+            | "MESSAGE_CREATE"
+            | "PRESENCE_UPDATE"
+            | "GUILD_MEMBER_LIST_UPDATE"
+            | "GUILD_CREATE"
+            | "TYPING_START"
+            | "RELATIONSHIP_ADD"
+            | "RELATIONSHIP_UPDATE"
+            | "RELATIONSHIP_REMOVE"
+            | "VOICE_STATE_UPDATE"
+            | "VOICE_SERVER_UPDATE"
+            | "STREAM_CREATE"
+            | "STREAM_SERVER_UPDATE"
+    )
 }
 
 // ─── Gateway opcodes ─────────────────────────────────────────────────────────
@@ -522,20 +539,40 @@ enum GatewayExit {
 #[allow(clippy::items_after_test_module)]
 mod tests {
     use super::{
-        activity_payload, gateway_heartbeat_payload, generic_dispatch_needed, presence_key, CustomActivity, GameActivity, GatewayPresence,
-        PresenceStatus,
+        activity_payload, gateway_heartbeat_payload, generic_dispatch_needed, presence_key,
+        CustomActivity, GameActivity, GatewayPresence, PresenceStatus,
     };
 
     #[test]
     fn dedicated_events_are_not_duplicated_but_call_and_message_changes_are_delivered() {
-        for event in ["MESSAGE_CREATE", "PRESENCE_UPDATE", "VOICE_STATE_UPDATE", "VOICE_SERVER_UPDATE", "TYPING_START"] {
+        for event in [
+            "MESSAGE_CREATE",
+            "PRESENCE_UPDATE",
+            "VOICE_STATE_UPDATE",
+            "VOICE_SERVER_UPDATE",
+            "TYPING_START",
+        ] {
             assert!(!generic_dispatch_needed(event));
         }
-        for event in ["CALL_CREATE", "CALL_UPDATE", "CALL_DELETE", "MESSAGE_UPDATE", "MESSAGE_DELETE", "MESSAGE_REACTION_ADD", "CHANNEL_UPDATE"] {
+        for event in [
+            "CALL_CREATE",
+            "CALL_UPDATE",
+            "CALL_DELETE",
+            "MESSAGE_UPDATE",
+            "MESSAGE_DELETE",
+            "MESSAGE_REACTION_ADD",
+            "CHANNEL_UPDATE",
+        ] {
             assert!(generic_dispatch_needed(event));
         }
-        assert_eq!(presence_key(&serde_json::json!({"user":{"id":"one"}})), Some("one".into()));
-        assert_eq!(presence_key(&serde_json::json!({"user_id":"two"})), Some("two".into()));
+        assert_eq!(
+            presence_key(&serde_json::json!({"user":{"id":"one"}})),
+            Some("one".into())
+        );
+        assert_eq!(
+            presence_key(&serde_json::json!({"user_id":"two"})),
+            Some("two".into())
+        );
         assert_eq!(presence_key(&serde_json::json!({})), None);
     }
 

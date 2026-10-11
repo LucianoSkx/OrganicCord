@@ -620,7 +620,7 @@ export function buildDmSystemPrompt(
   const notes = memory.user_notes[humanId];
   const thread = (memory.user_threads[humanId] ?? []).slice(-10);
   const threadSummary = thread.length > 0
-    ? thread.map((m) => `${m.author_name}: ${m.content}`).join("\n")
+    ? thread.map((m: ChannelMessage) => `${m.author_name}: ${m.content}`).join("\n")
     : null;
 
   return [

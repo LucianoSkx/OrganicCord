@@ -35,6 +35,7 @@ export interface AiConversation {
   id: string;
   label: string;
   channel_id: string;
+  account_id: string;
   guild_id: string | null;
   participants: AiParticipant[];
   topic: string;
@@ -78,6 +79,9 @@ export interface ConvRuntimeInfo {
 export interface AiConversationStore {
   conversations: AiConversation[];
   runtimeInfo: Record<string, ConvRuntimeInfo>;
+  runtimeStatus: Record<string, ConversationStatus>;
+  runtimeError: Record<string, string | null>;
+  runtimeRounds: Record<string, number>;
   addConversation: (conv: AiConversation) => void;
   updateConversation: (id: string, patch: Partial<AiConversation>) => void;
   removeConversation: (id: string) => void;
@@ -86,4 +90,43 @@ export interface AiConversationStore {
   addLog: (log: any) => void;
   clearLogs: (id: string) => void;
   _setInfo: (convId: string, patch: Partial<ConvRuntimeInfo>) => void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- logs aceitam campos livres
+  _pushLog: (log: any) => void;
+  _startCountdown: (convId: string, delayMs: number) => void;
 }
+
+/** Tipos de runtime propositalmente permissivos: o motor os lê e muta de forma estrutural. */
+/* eslint-disable @typescript-eslint/no-explicit-any -- o formato varia por feature do motor */
+export type RuntimeState = any;
+export type ChannelMessage = any;
+export type ParticipantMemory = any;
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+export const makeRuntime = (): RuntimeState => ({
+  participant_memory: {},
+  local_sent: [],
+  rounds: 0,
+  error: null,
+  paused: false,
+} as RuntimeState);
+
+export const makeParticipantMemory = (): ParticipantMemory => ({
+  user_threads: {},
+} as ParticipantMemory);
+
+export const defaultInfo = (): ConvRuntimeInfo => ({
+  status: "idle",
+  error: null,
+  rounds: 0,
+  next_participant_id: null,
+  next_participant_name: null,
+  next_participant_color: null,
+  burst_lock_id: null,
+  burst_lock_name: null,
+  countdown_ms: null,
+  countdown_started_at: null,
+  countdown_total_ms: null,
+  is_generating: false,
+  generating_participant_name: null,
+  generating_participant_color: null,
+});

@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use sysinfo::{System, ProcessRefreshKind, UpdateKind};
-use tauri::{Emitter, Manager};
+use sysinfo::{ProcessRefreshKind, System, UpdateKind};
 use tauri::State;
+use tauri::{Emitter, Manager};
 use tauri_plugin_store::StoreBuilder;
 use uuid::Uuid;
 
@@ -250,7 +250,10 @@ impl GameDetectionManager {
                 .lock()
                 .map_err(|_| "Game detector lock poisoned")?
                 .clear();
-            *self.system.lock().map_err(|_| "Game process lock poisoned")? = System::new();
+            *self
+                .system
+                .lock()
+                .map_err(|_| "Game process lock poisoned")? = System::new();
             return Ok(None);
         }
 
@@ -261,9 +264,16 @@ impl GameDetectionManager {
             .filter(|game| game.enabled)
             .filter_map(|game| normalize_process_name(&game.executable).map(|key| (key, game)))
             .collect();
-        if enabled_games.is_empty() { return Ok(None); }
-        let mut system = self.system.lock().map_err(|_| "Game process lock poisoned")?;
-        system.refresh_processes_specifics(ProcessRefreshKind::new().with_exe(UpdateKind::OnlyIfNotSet));
+        if enabled_games.is_empty() {
+            return Ok(None);
+        }
+        let mut system = self
+            .system
+            .lock()
+            .map_err(|_| "Game process lock poisoned")?;
+        system.refresh_processes_specifics(
+            ProcessRefreshKind::new().with_exe(UpdateKind::OnlyIfNotSet),
+        );
 
         let mut seen = HashSet::new();
         let mut observed = self
@@ -319,10 +329,14 @@ impl GameDetectionManager {
 
 fn normalize_registered_executable(value: &str) -> Option<String> {
     let filename = executable_filename(value)?;
-    if !filename.to_ascii_lowercase().ends_with(".exe") {
-        return None;
+    // Windows usa .exe; processos nativos de Linux e jogos sob Proton aparecem
+    // sem extensão, então os dois formatos são aceitos.
+    let lower = filename.to_ascii_lowercase();
+    if lower.ends_with(".exe") || !filename.contains('.') {
+        Some(filename.to_string())
+    } else {
+        None
     }
-    Some(filename.to_string())
 }
 
 /// Windows can hide the executable path of protected games. In that case sysinfo
@@ -397,7 +411,8 @@ pub fn game_detection_remove_game(
 #[tauri::command]
 pub async fn game_detection_scan(app: tauri::AppHandle) -> Result<Option<DetectedGame>, String> {
     tokio::task::spawn_blocking(move || app.state::<GameDetectionManager>().scan(&app))
-        .await.map_err(|error| error.to_string())?
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 pub fn start_detection_service(app: tauri::AppHandle) {
@@ -411,7 +426,8 @@ pub fn start_detection_service(app: tauri::AppHandle) {
                 let settings = manager.settings(&app_for_scan)?;
                 let enabled = settings.enabled && settings.games.iter().any(|game| game.enabled);
                 manager.scan(&app_for_scan).map(|game| (enabled, game))
-            }).await;
+            })
+            .await;
             let enabled = match result {
                 Ok(Ok((enabled, game))) => {
                     if previous.as_ref() != Some(&game) {
@@ -440,9 +456,14 @@ mod tests {
 
     #[test]
     fn normalizes_only_executable_filenames() {
+        #[cfg(target_os = "windows")]
         assert_eq!(
             normalize_registered_executable(" C:\\Riot Games\\VALORANT-Win64-Shipping.exe "),
             Some("VALORANT-Win64-Shipping.exe".to_string())
+        );
+        assert_eq!(
+            normalize_registered_executable("/usr/bin/cs2"),
+            Some("cs2".to_string())
         );
         assert_eq!(
             normalize_process_name("VALORANT-Win64-Shipping"),
@@ -452,6 +473,10 @@ mod tests {
             normalize_process_name("VALORANT-Win64-Shipping.exe"),
             Some("valorant-win64-shipping".to_string())
         );
-        assert_eq!(normalize_registered_executable("not-a-program"), None);
+        assert_eq!(
+            normalize_registered_executable("meu-shell.sh"),
+            None,
+            "scripts não são binários de jogo"
+        );
     }
 }

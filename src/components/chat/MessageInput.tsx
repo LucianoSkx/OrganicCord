@@ -314,7 +314,7 @@ export function MessageInput({
       console.error("[audio] Error accessing microphone:", err);
       cleanupAudioResources();
       if (!mounted.current) return;
-      toast.error("Não foi possível acessar o microfone. Verifique a privacidade de áudio do Windows.");
+      toast.error("Não foi possível acessar o microfone. Verifique as permissões de áudio do sistema.");
     }
   };
 
