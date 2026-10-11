@@ -12,7 +12,7 @@ const SERVICE_NAME: &str = "OrganicCord";
 const KEY_ENTRY: &str = "encryption_key";
 
 /// Obtém ou cria a chave de criptografia AES-256 armazenada no keychain do OS.
-fn get_or_create_key() -> Result<Zeroizing<Vec<u8>>> {
+fn keyring_key() -> Result<Zeroizing<Vec<u8>>> {
     let entry = Entry::new(SERVICE_NAME, KEY_ENTRY).map_err(|e| anyhow!("Keyring error: {}", e))?;
 
     match entry.get_password() {
@@ -36,6 +36,82 @@ fn get_or_create_key() -> Result<Zeroizing<Vec<u8>>> {
         Err(error) => Err(anyhow!(
             "Não foi possível acessar o cofre seguro do sistema: {error}"
         )),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn keyring_is_unavailable(_error: &anyhow::Error) -> bool {
+    false
+}
+
+/// Sessões Linux/BSD sem secret-service ou KWallet deixam o keyring
+/// inacessível; nesse caso a chave fica em arquivo restrito ao usuário.
+#[cfg(not(target_os = "windows"))]
+fn keyring_is_unavailable(error: &anyhow::Error) -> bool {
+    matches!(
+        error.downcast_ref::<keyring::Error>(),
+        Some(keyring::Error::PlatformFailure(_)) | Some(keyring::Error::NoStorageAccess(_))
+    )
+}
+
+#[cfg(not(target_os = "windows"))]
+fn fallback_key_path() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .map(|home| std::path::PathBuf::from(home).join(".local").join("share"))
+        })?;
+    Some(base.join("OrganicCord").join("encryption_key"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn fallback_key() -> Result<Zeroizing<Vec<u8>>> {
+    let path = fallback_key_path().ok_or_else(|| anyhow!("HOME/XDG_DATA_HOME indefinido"))?;
+
+    if let Ok(stored) = std::fs::read(&path) {
+        let key = Zeroizing::new(stored);
+        if key.len() == 32 {
+            return Ok(key);
+        }
+        return Err(anyhow!("Invalid key length"));
+    }
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut key = Zeroizing::new(vec![0u8; 32]);
+    OsRng.fill_bytes(&mut key);
+
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)?;
+        file.write_all(&key)?;
+    }
+
+    #[cfg(not(unix))]
+    std::fs::write(&path, &*key)?;
+
+    Ok(key)
+}
+
+fn get_or_create_key() -> Result<Zeroizing<Vec<u8>>> {
+    match keyring_key() {
+        Ok(key) => Ok(key),
+        Err(error) if keyring_is_unavailable(&error) => {
+            log::warn!("[storage] O cofre do sistema está indisponível; a chave de criptografia usará um arquivo local com permissão 0600.");
+            fallback_key()
+        }
+        Err(error) => Err(error),
     }
 }
 

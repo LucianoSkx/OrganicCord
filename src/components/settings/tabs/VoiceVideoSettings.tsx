@@ -170,14 +170,14 @@ export function VoiceVideoSettings() {
           <label style={fieldStyle}>
             <span>Entrada</span>
             <select value={inputDeviceId ?? ""} onChange={(event) => setInputDevice(event.target.value || null)} style={selectStyle}>
-              <option value="">Padrão do Windows{defaultInput ? `: ${defaultInput.name}` : ""}</option>
+              <option value="">Padrão do sistema{defaultInput ? `: ${defaultInput.name}` : ""}</option>
               {inputs.map((device) => <option key={device.id} value={device.id}>{device.name}{device.is_default ? " (padrão)" : ""}</option>)}
             </select>
           </label>
           <label style={fieldStyle}>
             <span>Saída</span>
             <select value={outputDeviceId ?? ""} onChange={(event) => setOutputDevice(event.target.value || null)} style={selectStyle}>
-              <option value="">Padrão de comunicações do Windows{defaultOutput ? `: ${defaultOutput.name}` : ""}</option>
+              <option value="">Padrão de comunicações{defaultOutput ? `: ${defaultOutput.name}` : ""}</option>
               {outputs.map((device) => <option key={device.id} value={device.id}>{device.name}{device.is_default ? " (padrão)" : ""}</option>)}
             </select>
           </label>

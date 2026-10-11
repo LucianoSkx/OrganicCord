@@ -73,8 +73,8 @@ function analyzeConversationState(msgs: ChannelMessage[]): string {
 
   // Compare vocabulary of first half vs second half to detect topic evolution
   const half = Math.floor(recent.length / 2);
-  const firstHalfWords = new Set(recent.slice(0, half).map((m) => m.content.toLowerCase().split(/\s+/).filter((w) => w.length > 3 && !ORCH_STOP.has(w))).flat());
-  const secondHalfWords = new Set(recent.slice(half).map((m) => m.content.toLowerCase().split(/\s+/).filter((w) => w.length > 3 && !ORCH_STOP.has(w))).flat());
+  const firstHalfWords = new Set(recent.slice(0, half).map((m: ChannelMessage) => m.content.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3 && !ORCH_STOP.has(w))).flat());
+  const secondHalfWords = new Set(recent.slice(half).map((m: ChannelMessage) => m.content.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3 && !ORCH_STOP.has(w))).flat());
   const intersection = [...firstHalfWords].filter((w) => secondHalfWords.has(w)).length;
   const union = new Set([...firstHalfWords, ...secondHalfWords]).size;
   const topicSimilarity = union > 0 ? intersection / union : 0;

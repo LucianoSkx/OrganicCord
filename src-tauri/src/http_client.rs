@@ -22,8 +22,8 @@ pub struct DiscordClient {
 }
 
 pub fn discord_client(token: &str) -> Result<DiscordClient, String> {
-    let mut authorization = HeaderValue::from_str(token)
-        .map_err(|e| format!("invalid token header: {e}"))?;
+    let mut authorization =
+        HeaderValue::from_str(token).map_err(|e| format!("invalid token header: {e}"))?;
     authorization.set_sensitive(true);
     Ok(DiscordClient {
         transport: TRANSPORT.as_ref().map_err(Clone::clone)?.clone(),
@@ -50,8 +50,14 @@ mod transport_tests {
     fn shared_transport_keeps_account_headers_separate() {
         let first = discord_client("account-one").unwrap();
         let second = discord_client("account-two").unwrap();
-        let a = first.get("https://discord.com/api/v10/users/@me").build().unwrap();
-        let b = second.post("https://discord.com/api/v10/channels/1/messages").build().unwrap();
+        let a = first
+            .get("https://discord.com/api/v10/users/@me")
+            .build()
+            .unwrap();
+        let b = second
+            .post("https://discord.com/api/v10/channels/1/messages")
+            .build()
+            .unwrap();
         assert_eq!(a.headers()[AUTHORIZATION], "account-one");
         assert_eq!(b.headers()[AUTHORIZATION], "account-two");
         assert!(a.headers()[AUTHORIZATION].is_sensitive());

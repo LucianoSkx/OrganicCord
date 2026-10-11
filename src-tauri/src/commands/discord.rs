@@ -738,9 +738,14 @@ struct BinaryMessageMetadata {
     waveform: Option<String>,
 }
 
-fn binary_message(request: &tauri::ipc::Request<'_>) -> Result<(BinaryMessageMetadata, Vec<u8>), String> {
-    let header = request.headers().get("x-organic-metadata")
-        .and_then(|value| value.to_str().ok()).filter(|value| value.len() <= 32_768)
+fn binary_message(
+    request: &tauri::ipc::Request<'_>,
+) -> Result<(BinaryMessageMetadata, Vec<u8>), String> {
+    let header = request
+        .headers()
+        .get("x-organic-metadata")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| value.len() <= 32_768)
         .ok_or("Metadados do anexo inválidos")?;
     let decoded = urlencoding::decode(header).map_err(|_| "Metadados do anexo inválidos")?;
     let metadata = serde_json::from_str(&decoded).map_err(|_| "Metadados do anexo inválidos")?;
@@ -755,24 +760,49 @@ fn binary_message(request: &tauri::ipc::Request<'_>) -> Result<(BinaryMessageMet
 
 #[tauri::command]
 pub async fn send_attachment_bytes(
-    request: tauri::ipc::Request<'_>, attachments: State<'_, AttachmentRegistry>,
-    rl: State<'_, RateLimiter>, app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
+    attachments: State<'_, AttachmentRegistry>,
+    rl: State<'_, RateLimiter>,
+    app: tauri::AppHandle,
 ) -> Result<DiscordMessage, String> {
     let (metadata, bytes) = binary_message(&request)?;
-    send_message_with_attachment(metadata.account_id, metadata.channel_id,
-        metadata.content.unwrap_or_default(), metadata.reply_to,
-        metadata.file_name.ok_or("Nome do arquivo ausente")?, None, Some(bytes), attachments, rl, app).await
+    send_message_with_attachment(
+        metadata.account_id,
+        metadata.channel_id,
+        metadata.content.unwrap_or_default(),
+        metadata.reply_to,
+        metadata.file_name.ok_or("Nome do arquivo ausente")?,
+        None,
+        Some(bytes),
+        attachments,
+        rl,
+        app,
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn send_voice_bytes(
-    request: tauri::ipc::Request<'_>, rl: State<'_, RateLimiter>, app: tauri::AppHandle,
+    request: tauri::ipc::Request<'_>,
+    rl: State<'_, RateLimiter>,
+    app: tauri::AppHandle,
 ) -> Result<DiscordMessage, String> {
     let (metadata, bytes) = binary_message(&request)?;
-    let duration = metadata.duration_secs.filter(|value| value.is_finite() && *value >= 0.0)
+    let duration = metadata
+        .duration_secs
+        .filter(|value| value.is_finite() && *value >= 0.0)
         .ok_or("Duração da gravação inválida")?;
-    send_voice_message(metadata.account_id, metadata.channel_id, bytes, duration,
-        metadata.waveform.unwrap_or_default(), metadata.reply_to, rl, app).await
+    send_voice_message(
+        metadata.account_id,
+        metadata.channel_id,
+        bytes,
+        duration,
+        metadata.waveform.unwrap_or_default(),
+        metadata.reply_to,
+        rl,
+        app,
+    )
+    .await
 }
 
 #[tauri::command]

@@ -135,7 +135,7 @@ function HeroPanel({
           </span>
         </h1>
         <p style={styles.heroSubtitle}>
-          Um cliente não oficial, nativo e multi-conta, desenvolvido abertamente para Windows.
+          Um cliente não oficial, nativo e multi-conta, desenvolvido abertamente para desktop.
         </p>
       </div>
 

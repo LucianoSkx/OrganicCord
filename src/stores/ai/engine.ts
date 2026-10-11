@@ -102,6 +102,7 @@ async function invokeWithRetry(
 // ─── Discord cache helper ─────────────────────────────────────────────────────
 
 export function addMessageToDiscordCache(
+  accountId: string,
   channelId: string,
   authorId: string,
   authorName: string,
@@ -118,7 +119,7 @@ export function addMessageToDiscordCache(
     reactions: [],
     referenced_message: null,
   };
-  useDiscordStore.getState().prependMessage(channelId, fakeMsg);
+  useDiscordStore.getState().prependMessage(accountId, channelId, fakeMsg);
 }
 
 // ─── Profile fetcher ──────────────────────────────────────────────────────────
@@ -280,7 +281,7 @@ export function getChannelContext(channelId: string, limit: number, rt: RuntimeS
     fromDiscord.map((m) => `${m.author_id}:${m.content.trim()}`)
   );
   rt.local_sent = rt.local_sent.filter(
-    (m) => !discordFingerprints.has(`${m.author_id}:${m.content.trim()}`)
+    (m: ChannelMessage) => !discordFingerprints.has(`${m.author_id}:${m.content.trim()}`)
   );
 
   const combined = [...fromDiscord, ...rt.local_sent].sort(
@@ -520,7 +521,7 @@ export async function runOneTurn(
           if (!text) return;
           const sentId = await invoke<string>("discord_send_text", { accountId: p.account_id, channelId: conv.channel_id, content: text, replyTo: latestHumanMsg.id });
           if (sentId) rt.sent_message_ids.set(sentId, p.user_id);
-          addMessageToDiscordCache(conv.channel_id, p.user_id, p.username, text);
+          addMessageToDiscordCache(conv.account_id, conv.channel_id, p.user_id, p.username, text);
           rt.local_sent.push({ id: `local-${Date.now()}-${Math.random()}`, author_id: p.user_id, author_name: p.username, content: text, timestamp: new Date().toISOString() });
           rt.last_message_ts = Date.now();
           store._pushLog({ ts: Date.now(), conv_id: convId, participant_id: p.id, participant_name: p.username, participant_color: p.color, type: "sent", text });
@@ -550,7 +551,7 @@ export async function runOneTurn(
       if (!rt.participant_memory[p.id]) rt.participant_memory[p.id] = makeParticipantMemory();
       const mem = rt.participant_memory[p.id];
       const thread = mem.user_threads[latestHumanMsg.author_id] ?? [];
-      if (!thread.some((m) => m.id === latestHumanMsg.id)) {
+      if (!thread.some((m: ChannelMessage) => m.id === latestHumanMsg.id)) {
         thread.push(latestHumanMsg);
         if (thread.length > 40) thread.shift();
         mem.user_threads[latestHumanMsg.author_id] = thread;
@@ -615,7 +616,7 @@ export async function runOneTurn(
             accountId: target.account_id, channelId: conv.channel_id, content: text, replyTo: msg.id,
           });
           if (sentId) rt.sent_message_ids.set(sentId, target.user_id);
-          addMessageToDiscordCache(conv.channel_id, target.user_id, target.username, text);
+          addMessageToDiscordCache(conv.account_id, conv.channel_id, target.user_id, target.username, text);
           const localMsg: ChannelMessage = { id: `local-${Date.now()}-${Math.random()}`, author_id: target.user_id, author_name: target.username, content: text, timestamp: new Date().toISOString() };
           rt.local_sent.push(localMsg);
           // Also record the bot's reply into the thread memory
@@ -647,7 +648,7 @@ export async function runOneTurn(
 
       // Record message in thread
       const thread = mem.user_threads[latestHumanMsg.author_id] ?? [];
-      if (!thread.some((m) => m.id === latestHumanMsg.id)) {
+      if (!thread.some((m: ChannelMessage) => m.id === latestHumanMsg.id)) {
         thread.push(latestHumanMsg);
         if (thread.length > 40) thread.shift();
         mem.user_threads[latestHumanMsg.author_id] = thread;
@@ -682,7 +683,7 @@ export async function runOneTurn(
             replyTo: latestHumanMsg.id,
           });
           if (sentId) rt.sent_message_ids.set(sentId, target.user_id);
-          addMessageToDiscordCache(conv.channel_id, target.user_id, target.username, text);
+          addMessageToDiscordCache(conv.account_id, conv.channel_id, target.user_id, target.username, text);
           const localMsg: ChannelMessage = { id: `local-${Date.now()}-${Math.random()}`, author_id: target.user_id, author_name: target.username, content: text, timestamp: new Date().toISOString() };
           rt.local_sent.push(localMsg);
           mem.user_threads[latestHumanMsg.author_id] = [...(mem.user_threads[latestHumanMsg.author_id] ?? []), localMsg].slice(-40);
@@ -754,7 +755,7 @@ export async function runOneTurn(
             replyTo: latestHumanMsg.id,
           });
           if (sentId) rt.sent_message_ids.set(sentId, p.user_id);
-          addMessageToDiscordCache(conv.channel_id, p.user_id, p.username, text);
+          addMessageToDiscordCache(conv.account_id, conv.channel_id, p.user_id, p.username, text);
           rt.local_sent.push({
             id: `local-${Date.now()}-${Math.random()}`,
             author_id: p.user_id,
@@ -829,7 +830,7 @@ export async function runOneTurn(
             replyTo: null,
           });
           if (sentId) rt.sent_message_ids.set(sentId, p.user_id);
-          addMessageToDiscordCache(conv.channel_id, p.user_id, p.username, text);
+          addMessageToDiscordCache(conv.account_id, conv.channel_id, p.user_id, p.username, text);
           rt.local_sent.push({ id: `local-${Date.now()}-${Math.random()}`, author_id: p.user_id, author_name: p.username, content: text, timestamp: new Date().toISOString() });
           rt.last_message_ts = Date.now();
           store._pushLog({ ts: Date.now(), conv_id: convId, participant_id: p.id, participant_name: p.username, participant_color: p.color, type: "sent", text });
@@ -888,7 +889,7 @@ export async function runOneTurn(
             replyTo: latestHumanMsg.id,
           });
           if (sentId) rt.sent_message_ids.set(sentId, p.user_id);
-          addMessageToDiscordCache(conv.channel_id, p.user_id, p.username, text);
+          addMessageToDiscordCache(conv.account_id, conv.channel_id, p.user_id, p.username, text);
           rt.local_sent.push({ id: `local-${Date.now()}-${Math.random()}`, author_id: p.user_id, author_name: p.username, content: text, timestamp: new Date().toISOString() });
           rt.last_message_ts = Date.now();
           store._pushLog({ ts: Date.now(), conv_id: convId, participant_id: p.id, participant_name: p.username, participant_color: p.color, type: "sent", text });
@@ -938,7 +939,7 @@ export async function runOneTurn(
           replyTo: humanMsg.id,
         });
         if (sentId) rt.sent_message_ids.set(sentId, participant.user_id);
-        addMessageToDiscordCache(conv.channel_id, participant.user_id, participant.username, text);
+        addMessageToDiscordCache(conv.account_id, conv.channel_id, participant.user_id, participant.username, text);
         rt.local_sent.push({
           id: `local-${Date.now()}-${Math.random()}`,
           author_id: participant.user_id,
@@ -1031,7 +1032,7 @@ export async function runOneTurn(
               replyTo: null,
             });
             if (sentId) rt.sent_message_ids.set(sentId, intervener.user_id);
-            addMessageToDiscordCache(conv.channel_id, intervener.user_id, intervener.username, text);
+            addMessageToDiscordCache(conv.account_id, conv.channel_id, intervener.user_id, intervener.username, text);
             rt.local_sent.push({
               id: `local-${Date.now()}-${Math.random()}`,
               author_id: intervener.user_id,
@@ -1186,7 +1187,7 @@ export async function runOneTurn(
             rt.sent_message_ids.delete(rt.sent_message_ids.keys().next().value!);
           }
         }
-        addMessageToDiscordCache(conv.channel_id, p.user_id, p.username, text);
+        addMessageToDiscordCache(conv.account_id, conv.channel_id, p.user_id, p.username, text);
         rt.local_sent.push({
           id: `local-${Date.now()}-${Math.random()}`,
           author_id: p.user_id,

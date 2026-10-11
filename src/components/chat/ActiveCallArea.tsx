@@ -395,7 +395,7 @@ export function ActiveCallArea({ recipient }: Props) {
                   border: "none", padding: "8px 12px", borderRadius: "var(--radius-sm)", textAlign: "left", cursor: "pointer", fontSize: 14,
                 }}
               >
-                Padrão do Windows{defaultInput ? `: ${defaultInput.name}` : ""}
+                Padrão do sistema{defaultInput ? `: ${defaultInput.name}` : ""}
               </button>
               {inputs.map((d) => (
                 <button
@@ -454,7 +454,7 @@ export function ActiveCallArea({ recipient }: Props) {
                   border: "none", padding: "8px 12px", borderRadius: "var(--radius-sm)", textAlign: "left", cursor: "pointer", fontSize: 14,
                 }}
               >
-                Padrão de comunicações do Windows{defaultOutput ? `: ${defaultOutput.name}` : ""}
+                Padrão de comunicações{defaultOutput ? `: ${defaultOutput.name}` : ""}
               </button>
               {outputs.map((d) => (
                 <button

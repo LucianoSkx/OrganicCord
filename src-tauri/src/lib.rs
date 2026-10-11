@@ -12,12 +12,23 @@ use tauri::Manager;
 
 const DIAGNOSTIC_LOG_FILE: &str = "organiccord.log";
 
-fn initialize_logging() -> Option<PathBuf> {
-    let log_directory = std::env::var_os("LOCALAPPDATA")
+fn log_directory() -> PathBuf {
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
+        return local_app_data.join("OrganicCord").join("logs");
+    }
+
+    let base = std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("OrganicCord")
-        .join("logs");
+        .filter(|path| path.is_absolute())
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local").join("state"))
+        })
+        .unwrap_or_else(std::env::temp_dir);
+    base.join("OrganicCord").join("logs")
+}
+
+fn initialize_logging() -> Option<PathBuf> {
+    let log_directory = log_directory();
     if let Err(error) = std::fs::create_dir_all(&log_directory) {
         eprintln!("OrganicCord não conseguiu criar a pasta de diagnóstico: {error}");
         let mut builder = organiccord_log_builder();
@@ -267,7 +278,7 @@ pub fn run() {
                 tauri::image::Image::new(&[], 0, 0)
             });
 
-            let _tray = TrayIconBuilder::new()
+            let tray_result = TrayIconBuilder::new()
                 .icon(icon)
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -303,7 +314,14 @@ pub fn run() {
                         }
                     }
                 })
-                .build(app)?;
+                .build(app)
+                .map(|_tray| ())
+                .map_err(|error| {
+                    // Sistemas minimais (wayland wlroots, headless) podem não ter
+                    // libappindicator; o app continua utilizável sem o tray.
+                    log::warn!("[tray] O ícone da bandeja não pôde ser criado: {error}");
+                });
+            let _ = tray_result;
 
             Ok(())
         })
@@ -315,7 +333,12 @@ pub fn run() {
                 let _ = window.hide();
                 api.prevent_close();
             }
-            if matches!(event, tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Focused(true)) {
+            if matches!(
+                event,
+                tauri::WindowEvent::CloseRequested { .. }
+                    | tauri::WindowEvent::Resized(_)
+                    | tauri::WindowEvent::Focused(true)
+            ) {
                 performance::window_changed(window.app_handle());
             }
         })
