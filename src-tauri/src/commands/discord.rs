@@ -1,3 +1,6 @@
+use std::path::PathBuf;
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::State;
@@ -6,7 +9,7 @@ use zeroize::Zeroizing;
 use crate::commands::account::load_accounts_from_store;
 use crate::commands::attachments::{AttachmentRegistry, MAX_ATTACHMENT_BYTES};
 use crate::gateway::GatewayManager;
-use crate::http_client::discord_client;
+use crate::http_client::{backoff_ms, discord_client, RetryConfig};
 use crate::rate_limit::{
     limits, rate_limited_delete, rate_limited_get, rate_limited_patch, rate_limited_patch_empty,
     rate_limited_post, rate_limited_post_empty, rate_limited_put_empty, RateLimiter,
@@ -184,6 +187,7 @@ pub async fn set_user_note(
 ) -> Result<(), String> {
     let token = get_token(&account_id, &app)?;
     let client = discord_client(&token)?;
+    let user_id = snowflake(&user_id)?;
     let url = format!("https://discord.com/api/v10/users/@me/notes/{}", user_id);
     let body = serde_json::json!({ "note": note });
     let bucket = format!("user-note:{user_id}");
@@ -223,6 +227,7 @@ pub async fn fetch_user_profile(
 ) -> Result<serde_json::Value, String> {
     let token = get_token(&account_id, &app)?;
     let client = discord_client(&token)?;
+    let user_id = snowflake(&user_id)?;
     let url = format!("https://discord.com/api/v10/users/{}/profile?with_mutual_guilds=true&with_mutual_friends=true", user_id);
     let bucket = format!("profile:{user_id}");
     let (limit, window) = limits::PROFILE_FETCH;
@@ -238,6 +243,7 @@ pub async fn start_dm_call(
 ) -> Result<(), String> {
     let token = get_token(&account_id, &app)?;
     let client = discord_client(&token)?;
+    let channel_id = snowflake(&channel_id)?;
     let url = format!(
         "https://discord.com/api/v10/channels/{}/call/ring",
         channel_id
@@ -265,6 +271,7 @@ pub async fn stop_dm_call(
 ) -> Result<(), String> {
     let token = get_token(&account_id, &app)?;
     let client = discord_client(&token)?;
+    let channel_id = snowflake(&channel_id)?;
     let url = format!(
         "https://discord.com/api/v10/channels/{}/call/stop-ringing",
         channel_id
@@ -463,6 +470,7 @@ pub async fn get_current_guild_member(
 ) -> Result<CurrentGuildMember, String> {
     let token = get_token(&account_id, &app)?;
     let client = discord_client(&token)?;
+    let guild_id = snowflake(&guild_id)?;
     let url = format!("https://discord.com/api/v10/users/@me/guilds/{guild_id}/member");
     let bucket = format!("current-member:{guild_id}");
     let (limit, window) = limits::GENERAL_GET;
@@ -479,6 +487,8 @@ pub async fn get_forum_threads(
 ) -> Result<serde_json::Value, String> {
     let token = get_token(&account_id, &app)?;
     let client = discord_client(&token)?;
+    let channel_id = snowflake(&channel_id)?;
+    let guild_id = snowflake(&guild_id)?;
 
     // Busca threads ativos primeiro
     let active_url = format!(
@@ -501,7 +511,7 @@ pub async fn get_forum_threads(
     if let Some(threads) = active_data["threads"].as_array() {
         let channel_threads: Vec<_> = threads
             .iter()
-            .filter(|t| t["parent_id"].as_str() == Some(&channel_id))
+            .filter(|t| t["parent_id"].as_str() == Some(channel_id))
             .cloned()
             .collect();
         all_threads.extend(channel_threads);
@@ -641,78 +651,121 @@ pub async fn send_message_with_attachment(
     let token = get_token(&account_id, &app)?;
     let client = discord_client(&token)?;
 
-    let part = if let Some(handle) = file_handle {
-        let selected = attachments.take(&handle)?;
-        let mut file = tokio::fs::File::open(&selected.path)
-            .await
-            .map_err(|_| "Não foi possível abrir o anexo selecionado.".to_string())?;
-        let metadata = file.metadata().await.map_err(|e| e.to_string())?;
-        let total_size = metadata.len();
+    // A fonte do anexo é descrita, não construída: cada tentativa de envio
+    // remonta o Form, então um arquivo em disco pode ser relido do zero.
+    enum AttachmentSource {
+        Stream {
+            path: PathBuf,
+            name: String,
+            total_size: u64,
+        },
+        Bytes {
+            data: Vec<u8>,
+            name: String,
+        },
+    }
 
+    let source = if let Some(handle) = file_handle {
+        let selected = attachments.take(&handle)?;
+        let total_size = tokio::fs::metadata(&selected.path)
+            .await
+            .map_err(|_| "Não foi possível abrir o anexo selecionado.".to_string())?
+            .len();
         if total_size == 0 || total_size > MAX_ATTACHMENT_BYTES {
             return Err("O anexo deve ter entre 1 byte e 25 MB.".to_string());
         }
-
-        let app_handle = app.clone();
-        let stream = async_stream::stream! {
-            let mut buffer = vec![0; 64 * 1024]; // 64 KB chunks
-            let mut uploaded: u64 = 0;
-
-            loop {
-                match tokio::io::AsyncReadExt::read(&mut file, &mut buffer).await {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        uploaded += n as u64;
-                        let percentage = if total_size > 0 {
-                            (uploaded as f64 / total_size as f64) * 100.0
-                        } else {
-                            100.0
-                        };
-
-                        use tauri::Emitter;
-                        let _ = app_handle.emit("upload-progress", serde_json::json!({
-                            "progress": percentage,
-                            "uploaded": uploaded,
-                            "total": total_size
-                        }));
-
-                        yield Ok::<bytes::Bytes, std::io::Error>(bytes::Bytes::copy_from_slice(&buffer[..n]));
-                    }
-                    Err(e) => {
-                        yield Err(e);
-                        break;
-                    }
-                }
-            }
-        };
-
-        let body = reqwest::Body::wrap_stream(stream);
-        reqwest::multipart::Part::stream_with_length(body, total_size).file_name(selected.name)
+        AttachmentSource::Stream {
+            path: selected.path,
+            name: selected.name,
+            total_size,
+        }
     } else if let Some(data) = file_data {
         if data.is_empty() || data.len() as u64 > MAX_ATTACHMENT_BYTES {
             return Err("O anexo deve ter entre 1 byte e 25 MB.".to_string());
         }
         let safe_name = validate_attachment_name(&file_name)?;
-        reqwest::multipart::Part::bytes(data).file_name(safe_name)
+        AttachmentSource::Bytes {
+            data,
+            name: safe_name,
+        }
     } else {
         return Err("Nenhum anexo fornecido".to_string());
     };
 
-    let mut form = reqwest::multipart::Form::new().part("files[0]", part);
-
+    let app_handle = app.clone();
     let mut payload = serde_json::json!({ "content": content });
     if let Some(ref_id) = reply_to {
         payload["message_reference"] = serde_json::json!({ "message_id": ref_id });
     }
+    let payload_json = payload.to_string();
 
-    form = form.text("payload_json", payload.to_string());
+    let build_form = move || -> Result<reqwest::multipart::Form, String> {
+        let part = match &source {
+            AttachmentSource::Stream {
+                path,
+                name,
+                total_size,
+            } => {
+                // Abertura síncrona de propósito: a fábrica precisa ser síncrona
+                // para o loop de retry, e abrir um arquivo local é barato.
+                let mut file = tokio::fs::File::from_std(
+                    std::fs::File::open(path)
+                        .map_err(|_| "Não foi possível abrir o anexo selecionado.".to_string())?,
+                );
+                let total_size = *total_size;
+                let progress_app = app_handle.clone();
+                let stream = async_stream::stream! {
+                    let mut buffer = vec![0; 64 * 1024]; // 64 KB chunks
+                    let mut uploaded: u64 = 0;
+
+                    loop {
+                        match tokio::io::AsyncReadExt::read(&mut file, &mut buffer).await {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                uploaded += n as u64;
+                                let percentage = if total_size > 0 {
+                                    (uploaded as f64 / total_size as f64) * 100.0
+                                } else {
+                                    100.0
+                                };
+
+                                use tauri::Emitter;
+                                let _ = progress_app.emit("upload-progress", serde_json::json!({
+                                    "progress": percentage,
+                                    "uploaded": uploaded,
+                                    "total": total_size
+                                }));
+
+                                yield Ok::<bytes::Bytes, std::io::Error>(bytes::Bytes::copy_from_slice(&buffer[..n]));
+                            }
+                            Err(e) => {
+                                yield Err(e);
+                                break;
+                            }
+                        }
+                    }
+                };
+                reqwest::multipart::Part::stream_with_length(
+                    reqwest::Body::wrap_stream(stream),
+                    total_size,
+                )
+                .file_name(name.clone())
+            }
+            AttachmentSource::Bytes { data, name } => {
+                reqwest::multipart::Part::bytes(data.clone()).file_name(name.clone())
+            }
+        };
+        Ok(reqwest::multipart::Form::new()
+            .part("files[0]", part)
+            .text("payload_json", payload_json.clone()))
+    };
 
     let url = format!(
         "https://discord.com/api/v10/channels/{}/messages",
         channel_id
     );
     let bucket = format!("msg_send:{channel_id}");
-    retry_post_multipart(&client, &url, form, &rl, &bucket).await
+    retry_post_multipart(&client, &url, build_form, &rl, &bucket).await
 }
 
 fn validate_attachment_name(name: &str) -> Result<String, String> {
@@ -820,11 +873,6 @@ pub async fn send_voice_message(
     let token = get_token(&account_id, &app)?;
     let client = discord_client(&token)?;
 
-    let part = reqwest::multipart::Part::bytes(audio_data)
-        .file_name("voice-message.ogg")
-        .mime_str("audio/ogg")
-        .unwrap_or_else(|_| reqwest::multipart::Part::bytes(vec![]).file_name("voice-message.ogg"));
-
     let mut payload = serde_json::json!({
         "flags": 8192,
         "attachments": [
@@ -840,17 +888,23 @@ pub async fn send_voice_message(
     if let Some(ref_id) = reply_to {
         payload["message_reference"] = serde_json::json!({ "message_id": ref_id });
     }
-
-    let form = reqwest::multipart::Form::new()
-        .part("files[0]", part)
-        .text("payload_json", payload.to_string());
+    let payload_json = payload.to_string();
+    let build_form = move || {
+        let part = reqwest::multipart::Part::bytes(audio_data.clone())
+            .file_name("voice-message.ogg")
+            .mime_str("audio/ogg")
+            .map_err(|e| format!("Não foi possível preparar o áudio: {e}"))?;
+        Ok(reqwest::multipart::Form::new()
+            .part("files[0]", part)
+            .text("payload_json", payload_json.clone()))
+    };
 
     let url = format!(
         "https://discord.com/api/v10/channels/{}/messages",
         channel_id
     );
     let bucket = format!("msg_send:{channel_id}");
-    retry_post_multipart::<DiscordMessage>(&client, &url, form, &rl, &bucket).await
+    retry_post_multipart::<DiscordMessage, _>(&client, &url, build_form, &rl, &bucket).await
 }
 
 #[tauri::command]
@@ -1152,6 +1206,7 @@ pub async fn close_dm(
 ) -> Result<(), String> {
     let token = get_token(&account_id, &app)?;
     let client = discord_client(&token)?;
+    let channel_id = snowflake(&channel_id)?;
 
     let url = format!("https://discord.com/api/v10/channels/{}", channel_id);
     let bucket = format!("close-dm:{channel_id}");
@@ -1224,6 +1279,8 @@ pub async fn discord_add_reaction(
 ) -> Result<(), String> {
     let token = get_token(&account_id, &app)?;
     let client = discord_client(&token)?;
+    let channel_id = snowflake(&channel_id)?;
+    let message_id = snowflake(&message_id)?;
     let encoded_emoji = urlencoding::encode(&emoji);
     let url = format!(
         "https://discord.com/api/v10/channels/{channel_id}/messages/{message_id}/reactions/{encoded_emoji}/@me"
@@ -1244,6 +1301,8 @@ pub async fn discord_remove_reaction(
 ) -> Result<(), String> {
     let token = get_token(&account_id, &app)?;
     let client = discord_client(&token)?;
+    let channel_id = snowflake(&channel_id)?;
+    let message_id = snowflake(&message_id)?;
     let encoded_emoji = urlencoding::encode(&emoji);
     let url = format!(
         "https://discord.com/api/v10/channels/{channel_id}/messages/{message_id}/reactions/{encoded_emoji}/@me"
@@ -1254,59 +1313,91 @@ pub async fn discord_remove_reaction(
 }
 
 /// POST multipart form with exponential backoff on transient errors.
-async fn retry_post_multipart<T>(
+///
+/// O Form é refeito a cada tentativa (a fábrica o constrói de novo), então um
+/// arquivo em disco é relido e um buffer em memória é clonado apenas quando
+/// há retry.
+async fn retry_post_multipart<T, F>(
     client: &crate::http_client::DiscordClient,
     url: &str,
-    form: reqwest::multipart::Form,
+    build_form: F,
     rl: &RateLimiter,
     bucket: &str,
 ) -> Result<T, String>
 where
     T: for<'de> serde::Deserialize<'de>,
+    F: Fn() -> Result<reqwest::multipart::Form, String>,
 {
-    // Since reqwest::multipart::Form cannot be cloned easily if it contains streams,
-    // and we are using raw bytes, we need to recreate the form if we retry.
-    // Let's just avoid retrying for file uploads
-    // to keep it simple and avoid memory overhead, or just try once and return.
-
+    let retry = RetryConfig::default();
     let (limit, window) = limits::MSG_SEND;
-    rl.acquire(bucket, limit, window).await;
-    let resp = match client.post(url).multipart(form).send().await {
-        Ok(r) => r,
-        Err(e) => return Err(e.to_string()),
-    };
 
-    let status = resp.status();
-    let headers = resp.headers().clone();
-    let body_text = resp.text().await.unwrap_or_default();
+    for attempt in 0..retry.max_attempts {
+        rl.acquire(bucket, limit, window).await;
 
-    if status == 429 {
-        rl.record_429(bucket, &headers, &body_text).await;
-        return Err(
-            "O Discord limitou temporariamente o envio. Tente novamente em instantes.".to_string(),
-        );
+        let form = build_form()?;
+        let resp = match client.post(url).multipart(form).send().await {
+            Ok(response) => response,
+            Err(error) if attempt + 1 < retry.max_attempts => {
+                tokio::time::sleep(Duration::from_millis(backoff_ms(attempt, &retry))).await;
+                log::warn!("[rate-limit] transient POST transport error in {bucket}: {error}");
+                continue;
+            }
+            Err(error) => return Err(error.to_string()),
+        };
+
+        let status = resp.status();
+        let headers = resp.headers().clone();
+        let body_text = resp.text().await.unwrap_or_default();
+
+        if status == 429 {
+            rl.record_429(bucket, &headers, &body_text).await;
+            if attempt + 1 < retry.max_attempts {
+                continue;
+            }
+            return Err(
+                "O Discord limitou temporariamente o envio. Tente novamente em instantes."
+                    .to_string(),
+            );
+        }
+
+        rl.update_from_response(bucket, &headers).await;
+
+        if status.is_server_error() && attempt + 1 < retry.max_attempts {
+            tokio::time::sleep(Duration::from_millis(backoff_ms(attempt, &retry))).await;
+            continue;
+        }
+
+        if status.is_success() {
+            return serde_json::from_str::<T>(&body_text).map_err(|e| {
+                format!(
+                    "Parse error: {} | body: {}",
+                    e,
+                    &body_text[..body_text.len().min(300)]
+                )
+            });
+        }
+
+        return Err(format!(
+            "Discord API error {}: {}",
+            status,
+            &body_text[..body_text.len().min(300)]
+        ));
     }
 
-    rl.update_from_response(bucket, &headers).await;
-
-    if status.is_success() {
-        return serde_json::from_str::<T>(&body_text).map_err(|e| {
-            format!(
-                "Parse error: {} | body: {}",
-                e,
-                &body_text[..body_text.len().min(300)]
-            )
-        });
-    }
-
-    Err(format!(
-        "Discord API error {}: {}",
-        status,
-        &body_text[..body_text.len().min(300)]
-    ))
+    Err("O Discord não aceitou o envio após várias tentativas.".to_string())
 }
 
 // --- Internal helpers ---
+
+/// Snowflakes do Discord: 1-20 dígitos ASCII. IDs vindos da fronteira do
+/// webview não podem conter `/`, `?` ou `&`, senão mudariam path e query.
+fn snowflake(id: &str) -> Result<&str, String> {
+    let valid = !id.is_empty() && id.len() <= 20 && id.bytes().all(|b| b.is_ascii_digit());
+    if !valid {
+        return Err("Identificador inválido.".to_string());
+    }
+    Ok(id)
+}
 
 #[tauri::command]
 pub async fn discord_subscribe_guild(
@@ -1409,6 +1500,8 @@ pub async fn search_messages(
 ) -> Result<serde_json::Value, String> {
     let token = get_token(&account_id, &app)?;
     let client = discord_client(&token)?;
+    let guild_id = guild_id.as_deref().map(snowflake).transpose()?;
+    let channel_id = channel_id.as_deref().map(snowflake).transpose()?;
 
     let url = if let Some(g) = guild_id {
         format!(
@@ -1428,4 +1521,26 @@ pub async fn search_messages(
 
     let (limit, window) = limits::GENERAL_GET;
     rate_limited_get(&client, &rl, &url, "message-search", limit, window).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::snowflake;
+
+    #[test]
+    fn accepts_discord_snowflakes() {
+        assert_eq!(snowflake("1"), Ok("1"));
+        assert_eq!(snowflake("231523152315231523"), Ok("231523152315231523"));
+    }
+
+    #[test]
+    fn rejects_anything_that_could_change_path_or_query() {
+        assert!(snowflake("").is_err());
+        assert!(snowflake("1/2").is_err());
+        assert!(snowflake("../../users/@me").is_err());
+        assert!(snowflake("123?userId=1").is_err());
+        assert!(snowflake("123&x").is_err());
+        assert!(snowflake("123 ").is_err());
+        assert!(snowflake("123456789012345678901").is_err());
+    }
 }
