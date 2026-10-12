@@ -16,7 +16,7 @@ An open-source, lightweight, multi-account desktop client for Discord. TerraCord
 
 ## Beta status
 
-TerraCord (fork Linux) is currently published as [`v0.3.0-beta.1`](https://github.com/aMathyzinn/TerraCord (fork Linux)/releases/tag/v0.3.0-beta.1). This release expands the lightweight desktop client with improved voice processing, game presence, and a more responsive chat experience. It is not intended to match every feature of the official Discord client.
+TerraCord (fork Linux) is currently published as [`v0.3.0-beta.1`](https://github.com/LucianoSkx/OrganicCord/releases/tag/v0.3.0-beta.1). This release expands the lightweight desktop client with improved voice processing, game presence, and a more responsive chat experience. It is not intended to match every feature of the official Discord client.
 
 | Available now | Not available yet |
 | --- | --- |
@@ -27,7 +27,7 @@ TerraCord (fork Linux) is currently published as [`v0.3.0-beta.1`](https://githu
 
 ## Install on Windows
 
-1. Download `TerraCord (fork Linux)_0.3.0-beta.1_x64-setup.exe` from the [release page](https://github.com/aMathyzinn/TerraCord (fork Linux)/releases/tag/v0.3.0-beta.1).
+1. Download `TerraCord (fork Linux)_0.3.0-beta.1_x64-setup.exe` from the [release page](https://github.com/LucianoSkx/OrganicCord/releases/tag/v0.3.0-beta.1).
 2. Run the installer on a Windows 10 or Windows 11 computer with WebView2 installed.
 3. Sign in and grant only the permissions required by the features you choose to use.
 
@@ -43,7 +43,7 @@ Get-FileHash .\TerraCord (fork Linux)_0.3.0-beta.1_x64-setup.exe -Algorithm SHA2
 4ED50107A54324694462F48CA2AFCF374838EA6AE075C90B458EF30059A00FED
 ```
 
-## Install on Linux (experimental)
+## Instalar no Linux (experimental)
 
 The Linux build produces a `.deb` and an `AppImage`. Voice, gateway, attachments, notifications, multi-account, and the login webview are functional; game detection also matches Linux/Proton processes. Screen sharing is not available on any platform yet.
 
@@ -113,7 +113,7 @@ Permissions are evaluated across server, role, member, and channel overrides. Re
 - The Content Security Policy restricts script, connection, media, and embedded-navigation origins.
 - External links are validated and require confirmation before the default browser is opened.
 
-These measures reduce the attack surface, but do not eliminate the risks inherent to an unofficial client. Read the [Security Policy](SECURITY.md) to report vulnerabilities.
+These measures reduce the attack surface, but do not eliminate the risks inherent to um cliente não oficial. Read the [Security Policy](SECURITY.md) to report vulnerabilities.
 
 ## Development
 
@@ -178,7 +178,7 @@ Using an isolated build directory avoids conflicts with an already-running Terra
 
 - [Contributing guide](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
-- [Official repository](https://github.com/aMathyzinn/TerraCord (fork Linux))
+- [Official repository](https://github.com/LucianoSkx/OrganicCord)
 - [Creator portfolio](https://damodara.xyz)
 
 Protocol changes should reference official documentation whenever available, include tests, and avoid compatibility claims without real transport, encryption, and media evidence.
