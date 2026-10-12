@@ -25,10 +25,14 @@ pub async fn start_discord_login(app: AppHandle) -> Result<(), String> {
     let login_url: tauri::Url = "https://discord.com/login"
         .parse()
         .map_err(|error| format!("URL de login inválida: {error}"))?;
-    std::process::Command::new("xdg-open")
-        .arg(login_url.as_str())
-        .spawn()
-        .map_err(|e| format!("Erro ao abrir navegador: {e}"))?;
+    let url: WebviewUrl = WebviewUrl::External(login_url);
+    let _ = WebviewWindowBuilder::new(&app, "discord_login", url)
+        .title("Login do Discord")
+        .inner_size(480.0, 720.0)
+        .resizable(false)
+        .incognito(true)
+        .build()
+        .map_err(|e| format!("Erro ao criar janela: {}", e))?;
 
     let app_clone = app.clone();
 
