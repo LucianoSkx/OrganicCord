@@ -2,6 +2,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 use zeroize::Zeroize;
@@ -47,10 +48,17 @@ pub enum QrEvent {
     Cancelled,
 }
 
+#[derive(Serialize)]
+struct GwHeartbeat {
+    op: String,
+}
+
 // Incoming gateway messages
 #[derive(Debug, Deserialize)]
 struct GwMsg {
     op: String,
+    #[serde(default)]
+    heartbeat_interval: Option<u64>,
     #[serde(default)]
     fingerprint: Option<String>,
     #[serde(default)]
@@ -145,25 +153,50 @@ async fn run_flow(app: AppHandle) -> anyhow::Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("WS connect failed: {}", e))?;
 
+    // O gateway desconecta quem não bate o coração: `hello` traz o intervalo.
+    let (heartbeat_tx, mut heartbeat_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let mut heartbeat_task: Option<tokio::task::JoinHandle<()>> = None;
+
     loop {
-        let raw = match ws.next().await {
-            Some(Ok(Message::Text(t))) => t.to_string(),
-            Some(Ok(Message::Ping(d))) => {
-                ws.send(Message::Pong(d)).await.ok();
+        let raw = tokio::select! {
+            incoming = ws.next() => {
+                match incoming {
+                    Some(Ok(Message::Text(t))) => t.to_string(),
+                    Some(Ok(Message::Ping(d))) => {
+                        ws.send(Message::Pong(d)).await.ok();
+                        continue;
+                    }
+                    Some(Ok(Message::Close(_))) | None => {
+                        let _ = app.emit("qr_login_event", QrEvent::Cancelled);
+                        if let Some(task) = heartbeat_task.take() { task.abort(); }
+                        return Ok(());
+                    }
+                    Some(Ok(_)) => continue,
+                    Some(Err(e)) => return Err(anyhow::anyhow!("WS error: {}", e)),
+                }
+            }
+            _ = heartbeat_rx.recv() => {
+                let beat = serde_json::to_string(&GwHeartbeat { op: "heartbeat".into() })?;
+                if ws.send(Message::Text(beat)).await.is_err() {
+                    break;
+                }
                 continue;
             }
-            Some(Ok(Message::Close(_))) | None => {
-                let _ = app.emit("qr_login_event", QrEvent::Cancelled);
-                return Ok(());
-            }
-            Some(Ok(_)) => continue,
-            Some(Err(e)) => return Err(anyhow::anyhow!("WS error: {}", e)),
         };
 
         let msg: GwMsg = match serde_json::from_str(&raw) {
             Ok(v) => v,
             Err(_) => continue,
         };
+
+        // Diagnóstico: só as chaves, nunca os valores (ticket/token são sigilosos).
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) {
+            let keys: Vec<&str> = value
+                .as_object()
+                .map(|object| object.keys().map(String::as_str).collect())
+                .unwrap_or_default();
+            log::info!("[qr] op={} campos={:?}", msg.op, keys);
+        }
 
         match msg.op.as_str() {
             // Server greeting — send our RSA public key
@@ -173,6 +206,21 @@ async fn run_flow(app: AppHandle) -> anyhow::Result<()> {
                     encoded_public_key: pub_b64.clone(),
                 })?;
                 ws.send(Message::Text(init)).await?;
+
+                if heartbeat_task.is_none() {
+                    let interval = msg.heartbeat_interval.unwrap_or(20_000).max(5_000);
+                    let ticker_tx = heartbeat_tx.clone();
+                    heartbeat_task = Some(tokio::spawn(async move {
+                        let mut ticker = tokio::time::interval(Duration::from_millis(interval));
+                        ticker.tick().await;
+                        loop {
+                            ticker.tick().await;
+                            if ticker_tx.send(()).is_err() {
+                                break;
+                            }
+                        }
+                    }));
+                }
             }
 
             "init" => {
@@ -225,22 +273,17 @@ async fn run_flow(app: AppHandle) -> anyhow::Result<()> {
                 let enc_b64 = msg.encrypted_user_payload.ok_or_else(|| {
                     anyhow::anyhow!("pending_finish missing encrypted_user_payload")
                 })?;
-
-                let enc = B64.decode(&enc_b64)?;
-                let padding = Oaep::<RsaSha256>::new();
-                let plain = private_key.decrypt(padding, &enc).map_err(|_| {
-                    anyhow::anyhow!("AES-CBC -> RSA decrypt failed for user payload")
-                })?;
-                let text = String::from_utf8_lossy(&plain).to_string();
-
-                // format: "id:avatar:discriminator:username"
-                let username = text.splitn(4, ':').nth(3).unwrap_or(&text).to_string();
-                let _ = app.emit("qr_login_event", QrEvent::Scanned { username });
+                emit_scanned(&app, &private_key, enc_b64)?;
             }
 
-            // User confirmed on mobile — contains the token (or ticket in v2)
-            "pending_login" | "pending_ticket" | "ticket" => {
-                // Em Remote Auth v2, o Discord envia "ticket" em vez de "encrypted_token".
+            // O Discord atual envia o payload do usuário sob `pending_ticket`;
+            // o ticket (ou o token) vem numa mensagem posterior.
+            "pending_ticket" | "pending_login" | "ticket" => {
+                if let Some(enc_b64) = msg.encrypted_user_payload.clone() {
+                    emit_scanned(&app, &private_key, enc_b64)?;
+                    continue;
+                }
+
                 if let Some(ticket) = msg.ticket {
                     // Nós emitimos isso para o frontend para trocar o ticket pelo token!
                     // Ou podemos pegar o token diretamente via HTTP POST aqui no backend!
@@ -290,7 +333,10 @@ async fn run_flow(app: AppHandle) -> anyhow::Result<()> {
 
                 // Fallback para v1 ou se vier no mesmo payload
                 let enc_b64 = msg.encrypted_token.ok_or_else(|| {
-                    anyhow::anyhow!("pending_login missing encrypted_token or ticket")
+                    anyhow::anyhow!(
+                        "fluxo de login remoto inesperado: op={} sem ticket ou token",
+                        msg.op
+                    )
                 })?;
 
                 let enc = B64.decode(&enc_b64)?;
@@ -314,14 +360,40 @@ async fn run_flow(app: AppHandle) -> anyhow::Result<()> {
 
             "cancel" => {
                 let _ = app.emit("qr_login_event", QrEvent::Cancelled);
+                if let Some(task) = heartbeat_task.take() {
+                    task.abort();
+                }
                 return Ok(());
             }
 
             _ => {
-                println!("Unhandled WS op: {}", msg.op);
+                log::info!("[qr] op desconhecida: {}", msg.op);
             }
         }
     }
+
+    if let Some(task) = heartbeat_task.take() {
+        task.abort();
+    }
+    Ok(())
+}
+
+/// Decifra o payload do usuário ("id:avatar:discriminator:username") e avisa
+/// o frontend que o QR foi lido.
+fn emit_scanned(
+    app: &AppHandle,
+    private_key: &RsaPrivateKey,
+    enc_b64: String,
+) -> anyhow::Result<()> {
+    let enc = B64.decode(&enc_b64)?;
+    let padding = Oaep::<RsaSha256>::new();
+    let plain = private_key
+        .decrypt(padding, &enc)
+        .map_err(|_| anyhow::anyhow!("AES-CBC -> RSA decrypt failed for user payload"))?;
+    let text = String::from_utf8_lossy(&plain).to_string();
+    let username = text.splitn(4, ':').nth(3).unwrap_or(&text).to_string();
+    let _ = app.emit("qr_login_event", QrEvent::Scanned { username });
+    Ok(())
 }
 
 fn make_qr_png(content: &str) -> anyhow::Result<String> {
