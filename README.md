@@ -1,22 +1,22 @@
 <h1>
-  <img src="src-tauri/icons/128x128.png" width="42" alt="OrganicCord logo" />
-  OrganicCord
+  <img src="src-tauri/icons/128x128.png" width="42" alt="TerraCord (fork Linux) logo" />
+  TerraCord (fork Linux)
 </h1>
 
-An open-source, lightweight, multi-account desktop client for Discord. OrganicCord brings conversations, communities, voice, presence, and notifications into a focused native desktop experience built with Tauri, Rust, React, and TypeScript. Windows is the reference platform; a Linux build is also available (see [Install on Linux](#install-on-linux-experimental)).
+An open-source, lightweight, multi-account desktop client for Discord. TerraCord (fork Linux) brings conversations, communities, voice, presence, and notifications into a focused native desktop experience built with Tauri, Rust, React, and TypeScript. Windows is the reference platform; a Linux build is also available (see [Install on Linux](#install-on-linux-experimental)).
 
 > [!WARNING]
-> OrganicCord is an **unofficial** Discord client. Discord does not provide a public, supported API for complete user clients, so service changes can affect compatibility. Do not use this project for account automation, spam, data harvesting, or self-bots. Keep the official Discord client available for important accounts.
+> TerraCord (fork Linux) is an **unofficial** Discord client. Discord does not provide a public, supported API for complete user clients, so service changes can affect compatibility. Do not use this project for account automation, spam, data harvesting, or self-bots. Keep the official Discord client available for important accounts.
 
 <p align="center">
-  <img src="docs/assets/organiccord-friends-preview.png" alt="An anonymized OrganicCord Friends interface preview" width="100%" />
+  <img src="docs/assets/organiccord-friends-preview.png" alt="An anonymized TerraCord (fork Linux) Friends interface preview" width="100%" />
 </p>
 
-*An anonymized preview of the OrganicCord Friends interface.*
+*An anonymized preview of the TerraCord (fork Linux) Friends interface.*
 
 ## Beta status
 
-OrganicCord is currently published as [`v0.3.0-beta.1`](https://github.com/aMathyzinn/OrganicCord/releases/tag/v0.3.0-beta.1). This release expands the lightweight desktop client with improved voice processing, game presence, and a more responsive chat experience. It is not intended to match every feature of the official Discord client.
+TerraCord (fork Linux) is currently published as [`v0.3.0-beta.1`](https://github.com/aMathyzinn/TerraCord (fork Linux)/releases/tag/v0.3.0-beta.1). This release expands the lightweight desktop client with improved voice processing, game presence, and a more responsive chat experience. It is not intended to match every feature of the official Discord client.
 
 | Available now | Not available yet |
 | --- | --- |
@@ -27,14 +27,14 @@ OrganicCord is currently published as [`v0.3.0-beta.1`](https://github.com/aMath
 
 ## Install on Windows
 
-1. Download `OrganicCord_0.3.0-beta.1_x64-setup.exe` from the [release page](https://github.com/aMathyzinn/OrganicCord/releases/tag/v0.3.0-beta.1).
+1. Download `TerraCord (fork Linux)_0.3.0-beta.1_x64-setup.exe` from the [release page](https://github.com/aMathyzinn/TerraCord (fork Linux)/releases/tag/v0.3.0-beta.1).
 2. Run the installer on a Windows 10 or Windows 11 computer with WebView2 installed.
 3. Sign in and grant only the permissions required by the features you choose to use.
 
 The current installer is not code-signed yet. Windows may show an unknown publisher warning; verify that the file came from the official release and check its hash before installing. Do not disable Windows security features to run the app.
 
 ```powershell
-Get-FileHash .\OrganicCord_0.3.0-beta.1_x64-setup.exe -Algorithm SHA256
+Get-FileHash .\TerraCord (fork Linux)_0.3.0-beta.1_x64-setup.exe -Algorithm SHA256
 ```
 
 `v0.3.0-beta.1` SHA-256:
@@ -47,11 +47,11 @@ Get-FileHash .\OrganicCord_0.3.0-beta.1_x64-setup.exe -Algorithm SHA256
 
 The Linux build produces a `.deb` and an `AppImage`. Voice, gateway, attachments, notifications, multi-account, and the login webview are functional; game detection also matches Linux/Proton processes. Screen sharing is not available on any platform yet.
 
-1. Install `OrganicCord_0.3.0-beta.1_amd64.deb` (or run the `AppImage`).
+1. Install `TerraCord (fork Linux)_0.3.0-beta.1_amd64.deb` (or run the `AppImage`).
 2. Keep the desktop portal stack available for notifications and the tray icon. The tray needs `libayatana-appindicator` / `libappindicator-gtk3`; without it the app still starts, just without the tray.
 3. Rich Presence via `discord_ipc` works when Discord Desktop runs on the same machine (it exposes the same IPC over Unix sockets).
 
-Diagnostic logs go to `$XDG_STATE_HOME/OrganicCord/logs` (`$HOME/.local/state/OrganicCord/logs` by default). If the system keyring (secret-service/KWallet) is unavailable, the encryption key falls back to a file restricted to the user (`$XDG_DATA_HOME/OrganicCord/encryption_key`, mode `0600`), and the app logs a warning on startup.
+Diagnostic logs go to `$XDG_STATE_HOME/TerraCord (fork Linux)/logs` (`$HOME/.local/state/TerraCord (fork Linux)/logs` by default). If the system keyring (secret-service/KWallet) is unavailable, the encryption key falls back to a file restricted to the user (`$XDG_DATA_HOME/TerraCord (fork Linux)/encryption_key`, mode `0600`), and the app logs a warning on startup.
 
 ## What you can do
 
@@ -80,7 +80,7 @@ Voice transport uses Opus. A call is only treated as connected after the voice g
 - Mute servers, channels, or users for a chosen duration.
 - Customize themes, contrast, density, message size, app icon, and keyboard shortcuts.
 - Update your avatar, bio, and profile color. Image banners remain subject to Discord account eligibility.
-- Detect supported local games and publish a basic “Playing” presence directly through the active OrganicCord account, without requiring Discord Desktop.
+- Detect supported local games and publish a basic “Playing” presence directly through the active TerraCord (fork Linux) account, without requiring Discord Desktop.
 
 ## Technical architecture
 
@@ -172,17 +172,17 @@ $env:CARGO_TARGET_DIR = "$PWD\src-tauri\target-installer"
 npm run tauri:build -- --bundles nsis
 ```
 
-Using an isolated build directory avoids conflicts with an already-running OrganicCord instance. Always verify an installer by version, timestamp, and SHA-256 before distributing it.
+Using an isolated build directory avoids conflicts with an already-running TerraCord (fork Linux) instance. Always verify an installer by version, timestamp, and SHA-256 before distributing it.
 
 ## Documentation and contributing
 
 - [Contributing guide](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
-- [Official repository](https://github.com/aMathyzinn/OrganicCord)
+- [Official repository](https://github.com/aMathyzinn/TerraCord (fork Linux))
 - [Creator portfolio](https://damodara.xyz)
 
 Protocol changes should reference official documentation whenever available, include tests, and avoid compatibility claims without real transport, encryption, and media evidence.
 
 ## License
 
-OrganicCord is released under the MIT License. The adapted copy of [`hpke-rs`](src-tauri/vendor/hpke-rs) remains under MPL-2.0; see its [`PATCH.md`](src-tauri/vendor/hpke-rs/PATCH.md).
+TerraCord (fork Linux) is released under the MIT License. The adapted copy of [`hpke-rs`](src-tauri/vendor/hpke-rs) remains under MPL-2.0; see its [`PATCH.md`](src-tauri/vendor/hpke-rs/PATCH.md).
