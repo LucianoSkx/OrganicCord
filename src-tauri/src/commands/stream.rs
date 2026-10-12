@@ -126,7 +126,7 @@ impl StreamManager {
         }
     }
 
-    async fn clear_local(&self, account_id: &str) -> Option<String> {
+    pub async fn clear_local(&self, account_id: &str) -> Option<String> {
         if let Some(pending) = self.pending.lock().await.remove(account_id) {
             log::info!(
                 "[stream][allocation] account={} attempt={} action=cancel_pending",

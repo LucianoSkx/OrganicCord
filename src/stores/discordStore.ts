@@ -51,7 +51,8 @@ interface DiscordCache {
   session_ids: Record<string, string>;            // accountId -> sessionId
   relationships: Record<string, DiscordRelationship[]>; // accountId → relationships
   presences: Record<string, Record<string, DiscordPresence>>; // accountId -> userId -> presence
-  threads: Record<string, DiscordThread[]>;                 // guildId → threads
+  threads: Record<string, DiscordThread[]>;                 // forumChannelId → threads
+  threadIndex: Record<string, Record<string, DiscordThread>>; // accountId → threadId → thread
   pinnedMessages: Record<string, DiscordMessage[]>; // channelId -> pinned messages
   unreads: Record<string, Record<string, { count: number; mentions: number; guildId?: string }>>; // accountId -> channelId -> unread data
   typingUsers: Record<string, { userId: string; timestamp: number; member?: DiscordMember }[]>; // channelId -> users
@@ -267,6 +268,7 @@ export const useDiscordStore = create<DiscordStore>()(
       relationships: {}, 
       presences: {}, 
       threads: {}, 
+      threadIndex: {},
       pinnedMessages: {}, 
       unreads: {},
       typingUsers: {}
@@ -530,10 +532,11 @@ export const useDiscordStore = create<DiscordStore>()(
         const threads = response.threads || (Array.isArray(response) ? response : []);
         if (epochFor(accountId) !== epoch) return;
         set((s) => {
-          // Salvar threads na key do guildId, mas como não temos o guildId aqui facilmente,
-          // podemos mapear por channelId? Wait! A cache.threads é Record<string, any[]>.
-          // Vamos continuar usando cache.threads, mas salvar na key do channelId para simplificar o ForumArea.
+          // A lista é a fonte por fórum; o índice resolve uma thread sem
+          // saber qual fórum a contém (a chave por guildId nunca era escrita).
           s.cache.threads[accountCacheKey(accountId, channelId)] = threads;
+          const index = (s.cache.threadIndex[accountId] ??= {});
+          for (const thread of threads) index[thread.id] = thread;
           s.loading.threads[accountCacheKey(accountId, channelId)] = false;
         });
       } catch (e) {
@@ -853,6 +856,8 @@ export const useDiscordStore = create<DiscordStore>()(
         get().prependMessage(accountId, channelId, message);
       } catch (err: unknown) {
         console.error("Erro ao enviar mensagem:", err);
+        // A falha real vem do backend; inventar uma causa esconderia rate
+        // limit, rede e permissão atrás de uma mensagem fixa.
         const clydeMsg: DiscordMessage = {
           id: "clyde-" + Date.now(),
           channel_id: channelId,
@@ -864,7 +869,7 @@ export const useDiscordStore = create<DiscordStore>()(
             avatar: null,
             bot: true,
           },
-          content: "Sua mensagem não pôde ser entregue. Você não compartilha um servidor comum com este usuário ou o usuário te bloqueou.",
+          content: `Sua mensagem não pôde ser entregue: ${describeSendError(err)}`,
           timestamp: new Date().toISOString(),
           edited_timestamp: null,
           attachments: [],
@@ -1219,7 +1224,7 @@ export const useDiscordStore = create<DiscordStore>()(
       set((s) => {
         for (const collection of [s.cache.guilds, s.cache.channels, s.cache.dms, s.cache.guildEmojis,
           s.cache.guildRoles, s.cache.guildMembers, s.cache.relationships, s.cache.presences,
-          s.cache.session_ids, s.cache.unreads, s.channelLoads, s.loading.guilds]) delete collection[accountId];
+          s.cache.session_ids, s.cache.unreads, s.cache.threadIndex, s.channelLoads, s.loading.guilds]) delete collection[accountId];
         for (const collection of [s.cache.messages, s.cache.threads, s.cache.pinnedMessages,
           s.cache.typingUsers, s.messagePages, s.loading.messages, s.loading.threads]) {
           for (const key of Object.keys(collection)) if (key.startsWith(`${accountId}:`)) delete collection[key];
@@ -1230,3 +1235,10 @@ export const useDiscordStore = create<DiscordStore>()(
     },
   }))
 );
+
+// Falhas de envio chegam do backend já descritas; só normalizamos o formato.
+function describeSendError(err: unknown): string {
+  if (err instanceof Error && err.message.trim()) return err.message.trim();
+  if (typeof err === "string" && err.trim()) return err.trim();
+  return "erro desconhecido ao enviar a mensagem";
+}

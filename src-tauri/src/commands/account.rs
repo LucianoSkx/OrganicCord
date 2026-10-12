@@ -89,9 +89,19 @@ pub async fn add_account(
 pub async fn remove_account(
     account_id: String,
     state: State<'_, SessionManager>,
+    gateway: State<'_, crate::gateway::GatewayManager>,
+    voice: State<'_, crate::commands::voice::VoiceManager>,
+    streams: State<'_, crate::commands::stream::StreamManager>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
+    // A sessão e as conexões ativas precisam cair antes de apagá-la: o gateway,
+    // a voz e a transmissão guardam o token em memória nas próprias tasks.
     state.remove_session(&account_id);
+    gateway.disconnect(&account_id).await;
+    voice.stop(&account_id).await;
+    if let Some(stream_key) = streams.clear_local(&account_id).await {
+        gateway.stop_stream(&account_id, stream_key).await?;
+    }
 
     let mut accounts = load_accounts_from_store(&app)?;
     accounts.retain(|a| a.id != account_id);
