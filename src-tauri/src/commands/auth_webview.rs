@@ -54,7 +54,7 @@ pub async fn start_discord_login(app: AppHandle) -> Result<(), String> {
                 None => {
                     // Janela foi fechada pelo usuário ou pelo sistema
                     if !LOGIN_SUCCESS.load(Ordering::SeqCst) {
-                        println!("[auth] Janela de login fechada sem concluir.");
+                        log::warn!("[auth] Janela de login fechada sem concluir.");
                         let _ = app_clone.emit(
                             "discord-login-cancelled",
                             serde_json::json!({ "cancelled": true }),
@@ -74,10 +74,7 @@ pub async fn start_discord_login(app: AppHandle) -> Result<(), String> {
                     break;
                 }
 
-                println!(
-                    "[auth] Detectado redirect para {}. Extraindo token...",
-                    current_url
-                );
+                log::info!("[auth] Detectado redirect. Extraindo token de https://discord.com/...");
 
                 let js = r#"
                     (function() {
