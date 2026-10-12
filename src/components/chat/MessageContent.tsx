@@ -14,37 +14,46 @@ interface Props {
 }
 
 function HighlightedText({ text, query }: { text: string; query?: string }) {
-  if (!query || !query.trim()) {
+  const trimmedQuery = query?.trim();
+  if (!trimmedQuery) {
     return <>{text}</>;
   }
 
-  const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(`(${escapedQuery})`, "gi");
-  const parts = text.split(regex);
+  const escapedQuery = trimmedQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const matches = [...text.matchAll(new RegExp(escapedQuery, "gi"))];
+  if (matches.length === 0) {
+    return <>{text}</>;
+  }
 
-  return (
-    <>
-      {parts.map((part, i) =>
-        regex.test(part) ? (
-          <mark
-            key={i}
-            style={{
-              background: "rgba(250, 166, 26, 0.45)",
-              color: "var(--text-normal)",
-              borderRadius: 3,
-              padding: "1px 4px",
-              fontWeight: 600,
-              boxShadow: "0 0 4px rgba(250, 166, 26, 0.3)",
-            }}
-          >
-            {part}
-          </mark>
-        ) : (
-          part
-        )
-      )}
-    </>
-  );
+  const nodes: React.ReactNode[] = [];
+  let cursor = 0;
+  matches.forEach((match, index) => {
+    const start = match.index ?? 0;
+    if (start > cursor) {
+      nodes.push(text.slice(cursor, start));
+    }
+    nodes.push(
+      <mark
+        key={`highlight-${index}-${start}`}
+        style={{
+          background: "rgba(250, 166, 26, 0.45)",
+          color: "var(--text-normal)",
+          borderRadius: 3,
+          padding: "1px 4px",
+          fontWeight: 600,
+          boxShadow: "0 0 4px rgba(250, 166, 26, 0.3)",
+        }}
+      >
+        {match[0]}
+      </mark>
+    );
+    cursor = start + match[0].length;
+  });
+  if (cursor < text.length) {
+    nodes.push(text.slice(cursor));
+  }
+
+  return <>{nodes}</>;
 }
 
 export function MessageContent({ content, channels = [], embed = false, highlightQuery }: Props) {

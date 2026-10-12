@@ -1,4 +1,5 @@
 import React from "react";
+import { useExternalLinkStore } from "@/stores/externalLinkStore";
 
 interface DiscordTextProps {
   content: string;
@@ -48,27 +49,32 @@ export function DiscordText({ content, style, className }: DiscordTextProps) {
 
   // Agora vamos processar cada parte de texto puro para extrair URLs
   const finalParts: React.ReactNode[] = [];
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
 
   parts.forEach((part, index) => {
     if (typeof part === "string") {
-      let match;
+      // Um regex novo por parte evita que o lastIndex vaze entre os pedaços.
+      const urlRegex = /(https?:\/\/[^\s]+)/g;
+      let match: RegExpExecArray | null;
       let lastUrlIndex = 0;
       while ((match = urlRegex.exec(part)) !== null) {
+        const url = match[1];
         if (match.index > lastUrlIndex) {
           finalParts.push(part.substring(lastUrlIndex, match.index));
         }
         finalParts.push(
           <a
             key={`url-${index}-${match.index}`}
-            href={match[1]}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: "var(--text-link)", textDecoration: "none" }}
+            href={url}
+            onClick={(e) => {
+              e.preventDefault();
+              useExternalLinkStore.getState().openExternalLink(url);
+            }}
+            className="hover-underline"
+            style={{ color: "var(--text-link)", textDecoration: "none", cursor: "pointer" }}
             onMouseOver={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = "underline")}
             onMouseOut={(e) => ((e.currentTarget as HTMLAnchorElement).style.textDecoration = "none")}
           >
-            {match[1]}
+            {url}
           </a>
         );
         lastUrlIndex = urlRegex.lastIndex;

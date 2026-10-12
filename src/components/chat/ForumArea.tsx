@@ -539,18 +539,9 @@ export function ForumArea({ channelId, guildId, accountId }: Props) {
   }, [loadThreads]);
 
   const channelThreads: DiscordThread[] = cache.threads[accountCacheKey(accountId, channelId)] || [];
-  const guildThreads: DiscordThread[] = cache.threads[accountCacheKey(accountId, guildId)] || [];
-
-  const allThreadsMap = new Map<string, DiscordThread>();
-  for (const t of channelThreads) allThreadsMap.set(t.id, t);
-  for (const t of guildThreads) {
-    if (t.parent_id === channelId) allThreadsMap.set(t.id, t);
-  }
-
-  let forumThreads = Array.from(allThreadsMap.values());
 
   // Sort: mais recentes primeiro por ID
-  forumThreads.sort((a, b) => {
+  const sortedThreads = [...channelThreads].sort((a, b) => {
     try {
       return BigInt(b.id) > BigInt(a.id) ? 1 : -1;
     } catch {
@@ -559,20 +550,17 @@ export function ForumArea({ channelId, guildId, accountId }: Props) {
   });
 
   // Filter by search
-  if (searchQuery.trim()) {
-    const q = searchQuery.toLowerCase();
-    forumThreads = forumThreads.filter(t =>
-      t.name?.toLowerCase().includes(q) ||
-      t.message?.content?.toLowerCase().includes(q)
-    );
-  }
+  const searchedThreads = searchQuery.trim()
+    ? sortedThreads.filter((t) => {
+        const q = searchQuery.trim().toLowerCase();
+        return t.name?.toLowerCase().includes(q) || t.message?.content?.toLowerCase().includes(q);
+      })
+    : sortedThreads;
 
   // Filter by active tag
-  if (activeTagFilter) {
-    forumThreads = forumThreads.filter(t =>
-      (t.applied_tags || []).includes(activeTagFilter)
-    );
-  }
+  const forumThreads = activeTagFilter
+    ? searchedThreads.filter((t) => (t.applied_tags || []).includes(activeTagFilter))
+    : searchedThreads;
 
   const isLoading = loading.threads[accountCacheKey(accountId, channelId)];
 

@@ -274,7 +274,7 @@ impl VoiceManager {
         }
     }
 
-    async fn stop(&self, account_id: &str) {
+    pub async fn stop(&self, account_id: &str) {
         if let Some(pending) = self.pending.lock().await.remove(account_id) {
             log::info!(
                 "[voice][allocation] account={} attempt={} action=cancel_pending channel={}",

@@ -1,6 +1,5 @@
 import { useShallow } from "zustand/react/shallow";
 import { useChannelMessages } from "@/hooks/useChannelMessages";
-import { accountCacheKey } from "@/lib/messageCache";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useDiscordStore } from "@/stores/discordStore";
 import { useAccountStore } from "@/stores/accountStore";
@@ -10,7 +9,7 @@ import { MessageInput, AttachmentData } from "./MessageInput";
 import { TypingIndicator } from "./TypingIndicator";
 import { PinnedMessagesPopover } from "./PinnedMessagesPopover";
 import { SearchResultsSidebar } from "./SearchResultsSidebar";
-import type { DiscordMessage, ChannelType, DiscordChannel } from "@/types";
+import type { DiscordMessage, ChannelType } from "@/types";
 import { Volume2, Drama, Megaphone, MessagesSquare, Hash, ArrowLeft, Phone, Video, Search, Ban, Lock } from "lucide-react";
 import { useVoiceStore } from "@/stores/voiceStore";
 import { ChatDropOverlay } from "./ChatDropOverlay";
@@ -54,9 +53,8 @@ export function ChatArea({ channelId, accountId }: Props) {
   const guilds = useDiscordStore((s) => s.cache.guilds[accountId]);
   const channels = useDiscordStore((s) => activeGuildId ? s.cache.channels[accountId]?.[activeGuildId] : undefined) ?? [];
   const channel = channels.find((c) => c.id === channelId);
-  const threads = useDiscordStore((s) => activeGuildId ? s.cache.threads[accountCacheKey(accountId, activeGuildId)] : undefined) ?? [];
-  const isThread = Boolean(!channel && activeGuildId && threads.some((t: DiscordChannel) => t.id === channelId));
-  const threadObj = isThread ? threads.find((t: DiscordChannel) => t.id === channelId) : null;
+  const threadObj = useDiscordStore((s) => (accountId && !channel) ? s.cache.threadIndex[accountId]?.[channelId] : undefined);
+  const isThread = Boolean(threadObj);
   const targetName = channel?.name || threadObj?.name || "canal";
   const permissionChannel = isThread
     ? channels.find((item) => item.id === threadObj?.parent_id)
@@ -407,9 +405,9 @@ function ChannelHeader({
 
   const channels = useDiscordStore((s) => activeGuildId ? s.cache.channels[accountId]?.[activeGuildId] : undefined) ?? [];
   const channel = channels.find((c) => c.id === channelId);
-  
-  const isThread = !channel && activeGuildId && cache.threads[accountCacheKey(accountId, activeGuildId)]?.some(t => t.id === channelId);
-  const threadObj = isThread ? cache.threads[accountCacheKey(accountId, activeGuildId)]?.find(t => t.id === channelId) : null;
+
+  const threadObj = !channel ? cache.threadIndex[accountId]?.[channelId] : undefined;
+  const isThread = Boolean(threadObj);
 
   return (
     <div

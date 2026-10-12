@@ -59,6 +59,7 @@ beforeEach(() => {
       relationships: {},
       presences: {},
       threads: {},
+      threadIndex: {},
       pinnedMessages: {},
       unreads: {},
       typingUsers: {},

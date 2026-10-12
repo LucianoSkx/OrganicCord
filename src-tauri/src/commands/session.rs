@@ -77,8 +77,10 @@ pub async fn connect_account(
 pub async fn disconnect_account(
     account_id: String,
     state: State<'_, SessionManager>,
+    gateway: State<'_, crate::gateway::GatewayManager>,
 ) -> Result<(), String> {
     state.remove_session(&account_id);
+    gateway.disconnect(&account_id).await;
     Ok(())
 }
 
