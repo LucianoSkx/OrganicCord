@@ -25,14 +25,12 @@ pub async fn start_discord_login(app: AppHandle) -> Result<(), String> {
     let login_url: tauri::Url = "https://discord.com/login"
         .parse()
         .map_err(|error| format!("URL de login inválida: {error}"))?;
-    let url: WebviewUrl = WebviewUrl::External(login_url);
-    let _ = WebviewWindowBuilder::new(&app, "discord_login", url)
-        .title("Login do Discord")
-        .inner_size(480.0, 720.0)
-        .resizable(false)
-        .incognito(true)
-        .build()
-        .map_err(|e| format!("Erro ao criar janela: {}", e))?;
+    // Webview interno não renderiza discord.com no AppImage (WebKitGTK isolado).
+    // Abre no navegador padrão para login, depois use a aba "Token".
+    std::process::Command::new("xdg-open")
+        .arg(login_url.as_str())
+        .spawn()
+        .map_err(|e| format!("Erro ao abrir navegador: {e}"))?;
 
     let app_clone = app.clone();
 
@@ -100,7 +98,8 @@ pub async fn start_discord_login(app: AppHandle) -> Result<(), String> {
                 "#;
 
                 let _ = win.eval(js.replace("__LOGIN_ATTEMPT__", &attempt.to_string()));
-                break; // Finaliza o loop para não reenviar script
+                // Não damos break aqui — esperamos a resposta discord_login_success
+                // O loop quebra quando LOGIN_SUCCESS ou IS_EXTRACTING mudam, ou quando a janela some
             }
         }
     });
@@ -138,6 +137,10 @@ pub async fn discord_login_success(
     match result {
         Ok(account) => {
             LOGIN_SUCCESS.store(true, Ordering::SeqCst);
+            IS_EXTRACTING.store(false, Ordering::SeqCst);
+            if let Some(win) = app.get_webview_window("discord_login") {
+                let _ = win.destroy();
+            }
             let _ = app.emit(
                 "discord-account-added",
                 serde_json::json!({ "account": account }),

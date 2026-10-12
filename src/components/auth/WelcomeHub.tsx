@@ -449,7 +449,8 @@ function AuthPanel({
       <div style={styles.tabBar}>
         {(
           [
-            { id: "webview" as AuthTab, label: "Janela Discord", icon: <MonitorSmartphone size={14} /> },
+            // Webview removido — WebKitGTK no AppImage não renderiza discord.com
+            // Login funciona por QR ou Token manual
             { id: "qr" as AuthTab, label: "QR Code", icon: <Smartphone size={14} /> },
             { id: "token" as AuthTab, label: "Token", icon: <Key size={14} /> },
           ] as const
