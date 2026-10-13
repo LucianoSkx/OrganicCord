@@ -57,3 +57,6 @@ scratch_test.js
 test_ws.js
 test_ws2.js
 test_ws_rsa.js
+
+# AppImage (artefato de build)
+*.AppImage
