@@ -3852,7 +3852,7 @@ dependencies = [
 
 [[package]]
 name = "organic-cord"
-version = "0.3.0-beta.1"
+version = "0.3.0-beta.2"
 dependencies = [
  "aes-gcm",
  "anyhow",
