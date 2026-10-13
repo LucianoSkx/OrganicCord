@@ -152,12 +152,12 @@ export function UserBottomBar({ onAddAccount }: UserBottomBarProps) {
         </Tooltip>
 
         {/* Deafen Button */}
-        <Tooltip content={isDeafened ? "Ativar áudio" : "Ensurdecer áudio"} position="top">
+        <Tooltip content={isDeafened ? "Ativar áudio" : "Silenciar áudio"} position="top">
           <button
             onClick={(e) => {
               e.stopPropagation();
               setIsDeafened((prev) => !prev);
-              toast.info(!isDeafened ? "Áudio ensurdecido" : "Áudio ativado");
+              toast.info(!isDeafened ? "Áudio silenciado" : "Áudio ativado");
             }}
             className="icon-btn"
             style={{

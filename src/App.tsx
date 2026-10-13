@@ -446,7 +446,7 @@ export default function App() {
         e.stopPropagation();
         useVoiceStore.getState().toggleDeafen();
         const isDeafened = useVoiceStore.getState().isDeafened;
-        toast.info(isDeafened ? "Áudio ensurdecido" : "Áudio desensurdecido");
+        toast.info(isDeafened ? "Áudio silenciado" : "Áudio ativado");
       }
     };
     document.addEventListener("keydown", handler, true);

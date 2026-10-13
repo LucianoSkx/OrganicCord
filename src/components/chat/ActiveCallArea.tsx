@@ -436,7 +436,7 @@ export function ActiveCallArea({ recipient }: Props) {
               background: "transparent",
               color: isDeafened ? "#fff" : "var(--interactive-normal)",
             }}
-            title={isDeafened ? "Desensurdecer" : "Ensurdecer"}
+            title={isDeafened ? "Ativar áudio" : "Silenciar áudio"}
           >
             <Headphones size={20} />
           </button>

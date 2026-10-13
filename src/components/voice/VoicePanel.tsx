@@ -370,7 +370,7 @@ export function VoicePanel() {
         {/* Deafen */}
         <button
           onClick={toggleDeafen}
-          title={isDeafened ? "Ativar áudio" : "Ensurdecer áudio"}
+          title={isDeafened ? "Ativar áudio" : "Silenciar áudio"}
           style={{
             flex: 1,
             height: 32,
