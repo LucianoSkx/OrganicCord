@@ -379,7 +379,7 @@ export function MyAccountSettings() {
               const Icon = s.client_info?.os === "iOS" || s.client_info?.os === "Android" ? Smartphone : Monitor;
               const os = s.client_info?.os || "Desconhecido";
               const loc = s.client_info?.location || "Localização desconhecida";
-              const browser = s.client_info?.client || "Client App";
+              const browser = s.client_info?.client || "Aplicativo";
               
               return (
                 <div key={s.id_hash || idx} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--bg-secondary)", padding: "16px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-subtle)" }}>
@@ -758,7 +758,7 @@ export function MyAccountSettings() {
                       height: 80
                     }}>
                       {avatarPreviewUrl ? (
-                        <img src={avatarPreviewUrl!} alt="Avatar preview" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
+                        <img src={avatarPreviewUrl!} alt="Prévia do avatar" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "50%" }} />
                       ) : newAvatarData === "" ? (
                         <div style={{ width: "100%", height: "100%", background: "var(--brand-500)", display: "flex", alignItems: "center", justifyContent: "center", color: "white", fontWeight: 700, fontSize: 28, borderRadius: "50%" }}>
                           {currentAccount!.username[0]?.toUpperCase()}

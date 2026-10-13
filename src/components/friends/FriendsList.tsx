@@ -85,7 +85,7 @@ export function FriendsList({ tab, searchQuery }: Props) {
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px" }}>
       <h2 style={{ fontSize: 12, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", marginBottom: 16 }}>
-        {tab === "online" && `Online — ${filteredList.length}`}
+        {tab === "online" && `Disponível — ${filteredList.length}`}
         {tab === "all" && `Todos os Amigos — ${filteredList.length}`}
         {tab === "pending" && `Pendente — ${filteredList.length}`}
         {tab === "blocked" && `Bloqueado — ${filteredList.length}`}

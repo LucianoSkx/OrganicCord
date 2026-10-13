@@ -104,7 +104,7 @@ export function Avatar({
       {avatarDecoration && (typeof avatarDecoration === 'string' ? avatarDecoration : avatarDecoration.asset) && (
         <img
           src={`https://cdn.discordapp.com/avatar-decoration-presets/${typeof avatarDecoration === 'string' ? avatarDecoration : avatarDecoration.asset}.png?passthrough=true`}
-          alt="Avatar Decoration"
+          alt="Decoração de avatar"
           style={{
             position: "absolute",
             top: "-10%",

@@ -271,15 +271,15 @@ export const MessageItem = memo(function MessageItem({ message, isGrouped, isOwn
                 />
               </div>
               <div style={{ fontSize: 12, marginTop: 4 }}>
-                <span style={{ color: "var(--text-muted)" }}>escape to </span>
-                <span style={{ color: "var(--text-link)", cursor: "pointer", fontWeight: 500 }} onClick={() => { setIsEditing(false); setEditValue(message.content || ""); }}>cancel</span>
-                <span style={{ color: "var(--text-muted)" }}> • enter to </span>
+                <span style={{ color: "var(--text-muted)" }}>esc para </span>
+                <span style={{ color: "var(--text-link)", cursor: "pointer", fontWeight: 500 }} onClick={() => { setIsEditing(false); setEditValue(message.content || ""); }}>cancelar</span>
+                <span style={{ color: "var(--text-muted)" }}> • enter para </span>
                 <span style={{ color: "var(--text-link)", cursor: "pointer", fontWeight: 500 }} onClick={() => {
                   if (activeAccountId && activeChannelId && editValue.trim()) {
                     editMessage(activeAccountId, activeChannelId, message.id, editValue);
                     setIsEditing(false);
                   }
-                }}>save</span>
+                }}>salvar</span>
               </div>
             </div>
           ) : message.content ? (

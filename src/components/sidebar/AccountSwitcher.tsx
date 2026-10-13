@@ -26,7 +26,7 @@ function sessionToDisplayStatus(
 }
 
 const PRESENCE_OPTIONS: { value: PresenceStatus; label: string; color: string }[] = [
-  { value: "online",    label: "Online",        color: "var(--status-online)" },
+  { value: "online",    label: "Disponível",  color: "var(--status-online)" },
   { value: "idle",      label: "Ausente",       color: "var(--status-idle)" },
   { value: "dnd",       label: "Não perturbe",  color: "var(--status-dnd)" },
   { value: "invisible", label: "Invisível",     color: "var(--status-offline)" },
@@ -34,7 +34,7 @@ const PRESENCE_OPTIONS: { value: PresenceStatus; label: string; color: string }[
 
 function statusLabel(s: ReturnType<typeof sessionToDisplayStatus>): string {
   switch (s) {
-    case "online":     return "Online";
+    case "online":     return "Disponível";
     case "idle":       return "Ausente";
     case "dnd":        return "Não perturbe";
     case "invisible":  return "Invisível";

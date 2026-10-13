@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 
 const STATUS_CONFIG: Record<PresenceStatus, { label: string; color: string; icon: React.ReactNode }> = {
-  online: { label: "Online", color: "var(--status-online)", icon: <Circle size={14} fill="var(--status-online)" color="var(--status-online)" /> },
+  online: { label: "Disponível", color: "var(--status-online)", icon: <Circle size={14} fill="var(--status-online)" color="var(--status-online)" /> },
   idle: { label: "Ausente", color: "var(--status-idle)", icon: <Moon size={14} fill="var(--status-idle)" color="var(--status-idle)" /> },
   dnd: { label: "Não perturbe", color: "var(--status-dnd)", icon: <MinusCircle size={14} fill="var(--status-dnd)" color="var(--status-dnd)" /> },
   invisible: { label: "Invisível", color: "var(--status-offline)", icon: <Circle size={14} color="var(--status-offline)" /> },
@@ -125,7 +125,7 @@ export function UserBottomBar({ onAddAccount }: UserBottomBarProps) {
               lineHeight: "14px",
             }}
           >
-            {userCustomStatus?.text || STATUS_CONFIG[currentPresence]?.label || "Online"}
+            {userCustomStatus?.text || STATUS_CONFIG[currentPresence]?.label || "Disponível"}
           </span>
         </div>
       </div>
