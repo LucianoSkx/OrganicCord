@@ -399,14 +399,14 @@ function ChannelHeader({
   accountId: string;
   onSearch: (q: string) => void;
 }) {
-  const { cache } = useDiscordStore(useShallow((s) => ({ cache: s.cache })));
+  const threadObjDirect = useDiscordStore((s) => s.cache.threadIndex[accountId]?.[channelId]);
   const { activeGuildId } = useNavigationStore(useShallow((s) => ({ activeGuildId: s.activeGuildId })));
   const { joinCall, leaveCall, isConnecting, isConnected } = useVoiceStore(useShallow((s) => ({ joinCall: s.joinCall, leaveCall: s.leaveCall, isConnecting: s.isConnecting, isConnected: s.isConnected })));
 
   const channels = useDiscordStore((s) => activeGuildId ? s.cache.channels[accountId]?.[activeGuildId] : undefined) ?? [];
   const channel = channels.find((c) => c.id === channelId);
 
-  const threadObj = !channel ? cache.threadIndex[accountId]?.[channelId] : undefined;
+  const threadObj = !channel ? threadObjDirect : undefined;
   const isThread = Boolean(threadObj);
 
   return (

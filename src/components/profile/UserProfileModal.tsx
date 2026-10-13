@@ -1,4 +1,3 @@
-import { useShallow } from "zustand/react/shallow";
 import React, { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useProfileStore } from "@/stores/profileStore";
@@ -8,7 +7,9 @@ import { fetchUserProfile } from "@/lib/tauri";
 import { Loader2, MessageSquare, X, Image as ImageIcon, MoreHorizontal, Gamepad2 } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { DiscordText } from "@/components/ui/DiscordText";
-import type { DiscordUserProfile } from "@/types";
+import type { DiscordGuild, DiscordUserProfile } from "@/types";
+
+const EMPTY_MY_GUILDS: DiscordGuild[] = [];
 
 export function UserProfileModal() {
   const { isOpen, userId, closeProfile } = useProfileStore();
@@ -37,9 +38,7 @@ export function UserProfileModal() {
     return undefined;
   };
 
-  const { cache } = useDiscordStore(useShallow((s) => ({ cache: s.cache })));
-  const myGuilds = activeAccountId ? cache.guilds[activeAccountId] || [] : [];
-
+  const myGuilds = useDiscordStore((s) => activeAccountId ? (s.cache.guilds[activeAccountId] || EMPTY_MY_GUILDS) : EMPTY_MY_GUILDS);
   useEffect(() => {
     if (isOpen && userId && activeAccountId) {
       setLoading(true);
@@ -369,7 +368,7 @@ export function UserProfileModal() {
                                 avatarHash={f.avatar} 
                                 size={40} 
                                 showStatus={true} 
-                                status={cache.presences[activeAccountId!]?.[f.id]?.status || "offline"}
+                                status={presences?.[f.id]?.status || "offline"}
                               />
                             </div>
                             <div style={{ display: "flex", flexDirection: "column" }}>

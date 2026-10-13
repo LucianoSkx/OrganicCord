@@ -8,6 +8,8 @@ import { useNavigationStore } from "@/stores/navigationStore";
 import { Avatar } from "@/components/ui/Avatar";
 import type { DiscordDM } from "@/types";
 
+const EMPTY_DMS: DiscordDM[] = [];
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -17,10 +19,8 @@ interface Props {
 export function ArchivedDMsModal({ isOpen, onClose, accountId }: Props) {
   const archivedDMsIds = useArchiveStore(state => state.archivedDMs[accountId] || []);
   const unarchiveDM = useArchiveStore(state => state.unarchiveDM);
-  const { cache } = useDiscordStore(useShallow((s) => ({ cache: s.cache })));
+  const allDMs = useDiscordStore((s) => s.cache.dms[accountId] || EMPTY_DMS);
   const { setActiveChannel } = useNavigationStore(useShallow((s) => ({ setActiveChannel: s.setActiveChannel })));
-
-  const allDMs = cache.dms[accountId] || [];
   const archivedDMs = allDMs.filter(dm => archivedDMsIds.includes(dm.id));
 
   return (

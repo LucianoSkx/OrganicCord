@@ -11,6 +11,8 @@ import type { DiscordThread, DiscordForumTag, Reaction } from "@/types";
 import { normalizeReactionEmoji } from "@/lib/emoji";
 import { createForumPost } from "@/lib/tauri";
 
+const EMPTY_THREADS: DiscordThread[] = [];
+
 interface Props {
   channelId: string;
   guildId: string;
@@ -521,13 +523,13 @@ function ForumThreadCard({
 }
 
 export function ForumArea({ channelId, guildId, accountId }: Props) {
-  const { cache, loading, fetchForumThreads } = useDiscordStore(useShallow((s) => ({ cache: s.cache, loading: s.loading, fetchForumThreads: s.fetchForumThreads })));
+  const { loading, fetchForumThreads } = useDiscordStore(useShallow((s) => ({ loading: s.loading, fetchForumThreads: s.fetchForumThreads })));
   const { setActiveChannel } = useNavigationStore(useShallow((s) => ({ setActiveChannel: s.setActiveChannel })));
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
 
-  const activeChannel = cache.channels[accountId]?.[guildId]?.find(c => c.id === channelId);
+  const activeChannel = useDiscordStore((s) => s.cache.channels[accountId]?.[guildId]?.find(c => c.id === channelId));
   const availableTags: DiscordForumTag[] = activeChannel?.available_tags || [];
 
   const loadThreads = useCallback(() => {
@@ -538,7 +540,7 @@ export function ForumArea({ channelId, guildId, accountId }: Props) {
     loadThreads();
   }, [loadThreads]);
 
-  const channelThreads: DiscordThread[] = cache.threads[accountCacheKey(accountId, channelId)] || [];
+  const channelThreads: DiscordThread[] = useDiscordStore((s) => s.cache.threads[accountCacheKey(accountId, channelId)] || EMPTY_THREADS);
 
   // Sort: mais recentes primeiro por ID
   const sortedThreads = [...channelThreads].sort((a, b) => {

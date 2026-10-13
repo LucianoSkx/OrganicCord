@@ -8,12 +8,14 @@ import { useNavigationStore } from "@/stores/navigationStore";
 import { MessageContent } from "./MessageContent";
 import { Avatar } from "@/components/ui/Avatar";
 import { formatTimestamp, getDisplayName } from "@/lib/utils";
-import type { DiscordChannel } from "@/types";
+import type { DiscordChannel, DiscordMessage } from "@/types";
+
+const EMPTY_PINS: DiscordMessage[] = [];
 
 export function PinnedMessagesPopover({ channels }: { channels?: DiscordChannel[] }) {
   const [open, setOpen] = useState(false);
   const { activeAccountId, activeChannelId } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, activeChannelId: s.activeChannelId })));
-  const { cache, fetchPinnedMessages, unpinMessage } = useDiscordStore(useShallow((s) => ({ cache: s.cache, fetchPinnedMessages: s.fetchPinnedMessages, unpinMessage: s.unpinMessage })));
+  const { fetchPinnedMessages, unpinMessage } = useDiscordStore(useShallow((s) => ({ fetchPinnedMessages: s.fetchPinnedMessages, unpinMessage: s.unpinMessage })));
 
   useEffect(() => {
     if (open && activeAccountId && activeChannelId) {
@@ -21,7 +23,7 @@ export function PinnedMessagesPopover({ channels }: { channels?: DiscordChannel[
     }
   }, [open, activeAccountId, activeChannelId, fetchPinnedMessages]);
 
-  const pins = activeChannelId ? cache.pinnedMessages[accountCacheKey(activeAccountId!, activeChannelId)] || [] : [];
+  const pins = useDiscordStore((s) => activeChannelId ? (s.cache.pinnedMessages[accountCacheKey(activeAccountId!, activeChannelId)] || EMPTY_PINS) : EMPTY_PINS);
 
   const handleUnpin = (messageId: string) => {
     if (activeAccountId && activeChannelId) {

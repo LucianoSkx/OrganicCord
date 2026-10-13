@@ -22,9 +22,7 @@ export function UserProfilePopover({
   const [loading, setLoading] = useState(false);
   const { activeAccountId } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId })));
   const { openProfile } = useProfileStore();
-  const { cache } = useDiscordStore(useShallow((s) => ({ cache: s.cache })));
-  
-  const presence = activeAccountId ? cache.presences[activeAccountId]?.[userId] : null;
+  const presence = useDiscordStore((s) => activeAccountId ? s.cache.presences[activeAccountId]?.[userId] : null);
   const activities = presence?.activities || [];
 
   useEffect(() => {

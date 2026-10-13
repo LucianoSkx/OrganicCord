@@ -48,9 +48,11 @@ const MessageRow = memo(function MessageRow({ index, style, data }: ListChildCom
   useLayoutEffect(() => {
     const node = ref.current;
     if (!node) return;
-    const update = () => data.measure(row.id, Math.ceil(node.getBoundingClientRect().height));
-    update();
-    const observer = new ResizeObserver(update);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      const measured = entry.borderBoxSize?.[0]?.blockSize ?? node.getBoundingClientRect().height;
+      data.measure(row.id, Math.ceil(measured));
+    });
     observer.observe(node);
     return () => observer.disconnect();
   }, [row.id, data.measure]);
@@ -72,8 +74,16 @@ const MessageRow = memo(function MessageRow({ index, style, data }: ListChildCom
 export function MessageList({ messages, isLoading, currentUserId, onLoadMore, onReply, onDelete, channels = EMPTY_CHANNELS }: Props) {
   const list = useRef<VariableSizeList<RowData>>(null);
   const sizes = useRef(new Map<string, number>());
+  const prefix = useRef<number[]>([0]);
+  const prefixDirty = useRef(true);
   const rows = useMemo(() => buildMessageRows(messages), [messages]);
   const rowsRef = useRef(rows);
+  const indexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (let i = 0; i < rows.length; i++) map.set(rows[i].id, i);
+    return map;
+  }, [rows]);
+  const indexMapRef = useRef(indexMap);
   const accountId = useNavigationStore((s) => s.activeAccountId);
   const channelId = useNavigationStore((s) => s.activeChannelId);
   const relationships = useDiscordStore((s) => accountId ? s.cache.relationships[accountId] : undefined);
@@ -87,54 +97,78 @@ export function MessageList({ messages, isLoading, currentUserId, onLoadMore, on
   const initialFrame = useRef<number>();
   const resizeFrame = useRef<number>();
   const firstChanged = useRef(Infinity);
-  const offsetFor = useCallback((index: number) => {
-    let offset = 0;
-    for (let i = 0; i < index; i++) {
-      const row = rowsRef.current[i];
-      offset += sizes.current.get(row.id) ?? estimate(row);
+  const scrolling = useRef(false);
+  const scrollIdle = useRef<number>();
+  const pendingRestore = useRef(false);
+  const rebuildPrefix = () => {
+    const current = rowsRef.current;
+    const arr = new Array<number>(current.length + 1);
+    arr[0] = 0;
+    for (let i = 0; i < current.length; i++) {
+      const row = current[i];
+      arr[i + 1] = arr[i] + (sizes.current.get(row.id) ?? estimate(row));
     }
-    return offset;
+    prefix.current = arr;
+    prefixDirty.current = false;
+  };
+  const offsetFor = useCallback((index: number) => {
+    if (prefixDirty.current) rebuildPrefix();
+    return prefix.current[Math.min(index, prefix.current.length - 1)] ?? 0;
   }, []);
   const restore = useCallback(() => {
     const state = viewport.current;
     if (state.nearBottom) list.current?.scrollToItem(Math.max(0, rowsRef.current.length - 1), "end");
     else {
-      const index = rowsRef.current.findIndex((row) => row.id === state.anchorId);
+      const index = indexMapRef.current.get(state.anchorId) ?? -1;
       if (index >= 0) list.current?.scrollTo(offsetFor(index) + state.within);
     }
   }, [offsetFor]);
   const measure = useCallback((id: string, height: number) => {
     if (height <= 0 || sizes.current.get(id) === height) return;
     sizes.current.set(id, height);
-    const index = rowsRef.current.findIndex((row) => row.id === id);
-    if (index < 0) return;
+    prefixDirty.current = true;
+    const index = indexMapRef.current.get(id);
+    if (index === undefined) return;
     firstChanged.current = Math.min(firstChanged.current, index);
     if (frame.current !== undefined) return;
     frame.current = requestAnimationFrame(() => {
-      list.current?.resetAfterIndex(firstChanged.current);
+      const changed = firstChanged.current;
       firstChanged.current = Infinity;
       frame.current = undefined;
-      restore();
+      // Durante o scroll ativo o próprio scroll re-renderiza a lista;
+      // pular o forceUpdate do resetAfterIndex evita um render extra por frame.
+      list.current?.resetAfterIndex(changed, !scrolling.current);
+      // Só compensa a posição quando a altura mudou acima do topo visível;
+      // mudanças abaixo não afetam o scroll e restaurar aqui briga com o usuário.
+      if (changed > visibleStart.current) return;
+      if (scrolling.current) pendingRestore.current = true;
+      else restore();
     });
   }, [restore]);
   useLayoutEffect(() => {
     rowsRef.current = rows;
+    indexMapRef.current = indexMap;
     const ids = new Set(rows.map((row) => row.id));
     for (const id of sizes.current.keys()) if (!ids.has(id)) sizes.current.delete(id);
+    prefixDirty.current = true;
     list.current?.resetAfterIndex(0);
-    restore();
+    // Arrastando o thumb, um scrollTo aqui arranca a lista da mão do usuário;
+    // deixa pendente e compensa quando o scroll parar.
+    if (scrolling.current) pendingRestore.current = true;
+    else restore();
     if (!initialized.current) {
       if (initialFrame.current !== undefined) cancelAnimationFrame(initialFrame.current);
       initialFrame.current = requestAnimationFrame(() => { restore(); initialized.current = true; });
     }
-  }, [rows, restore]);
+  }, [rows, indexMap, restore]);
   useLayoutEffect(() => {
-    sizes.current.clear(); list.current?.resetAfterIndex(0); restore();
+    sizes.current.clear(); prefixDirty.current = true; list.current?.resetAfterIndex(0); restore();
   }, [appearance, restore]);
   useLayoutEffect(() => () => {
     for (const pending of [frame.current, initialFrame.current, resizeFrame.current]) {
       if (pending !== undefined) cancelAnimationFrame(pending);
     }
+    if (scrollIdle.current !== undefined) clearTimeout(scrollIdle.current);
   }, []);
   const reveal = useCallback((id: string) => setRevealed((previous) => new Set([...previous, id])), []);
   const data = useMemo<RowData>(() => ({ rows, currentUserId, channels, onReply, onDelete, blocked, revealed, reveal, measure }),
@@ -146,7 +180,7 @@ export function MessageList({ messages, isLoading, currentUserId, onLoadMore, on
   return <div style={{ height: "100%", minHeight: 0 }} data-virtual-message-list>
     <AutoSizer onResize={({ width }) => {
       if (viewport.current.width && viewport.current.width !== width) {
-        sizes.current.clear(); list.current?.resetAfterIndex(0);
+        sizes.current.clear(); prefixDirty.current = true; list.current?.resetAfterIndex(0);
         if (resizeFrame.current !== undefined) cancelAnimationFrame(resizeFrame.current);
         resizeFrame.current = requestAnimationFrame(restore);
       }
@@ -154,6 +188,7 @@ export function MessageList({ messages, isLoading, currentUserId, onLoadMore, on
     }}>{({ height, width }) => {
       return <VariableSizeList ref={list} height={height} width={width} itemCount={rows.length} itemData={data}
         itemKey={(index, value) => value.rows[index].id} itemSize={(index) => sizes.current.get(rows[index].id) ?? estimate(rows[index])} overscanCount={8}
+        style={{ overscrollBehavior: "contain" }}
         onItemsRendered={({ visibleStartIndex }) => {
           visibleStart.current = visibleStartIndex;
         }}
@@ -161,6 +196,15 @@ export function MessageList({ messages, isLoading, currentUserId, onLoadMore, on
           const state = viewport.current;
           state.offset = scrollOffset;
           if (!scrollUpdateWasRequested && initialized.current) {
+            scrolling.current = true;
+            if (scrollIdle.current !== undefined) clearTimeout(scrollIdle.current);
+            scrollIdle.current = setTimeout(() => {
+              scrolling.current = false;
+              scrollIdle.current = undefined;
+              if (firstChanged.current !== Infinity) list.current?.resetAfterIndex(firstChanged.current);
+              firstChanged.current = Infinity;
+              if (pendingRestore.current) { pendingRestore.current = false; restore(); }
+            }, 150);
             state.nearBottom = offsetFor(rows.length) - height - scrollOffset < 100;
             const row = rows[visibleStart.current];
             if (row) { state.anchorId = row.id; state.within = scrollOffset - offsetFor(visibleStart.current); }

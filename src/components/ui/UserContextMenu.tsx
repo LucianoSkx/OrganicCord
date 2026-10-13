@@ -9,6 +9,7 @@ import * as api from "@/lib/tauri";
 import { toast } from "@/components/ui/Toast";
 import { AppConfirmDialog, AppTextDialog } from "@/components/ui/AppDialog";
 import { ChannelType } from "@/types";
+import type { DiscordDM, DiscordGuild } from "@/types";
 import {
   User,
   Phone,
@@ -27,6 +28,9 @@ import {
   Hash,
 } from "lucide-react";
 
+const EMPTY_GUILDS: DiscordGuild[] = [];
+const EMPTY_DMS: DiscordDM[] = [];
+
 interface Props {
   children: React.ReactNode;
   userId: string;
@@ -37,7 +41,7 @@ interface Props {
 export function UserContextMenu({ children, userId, guildId, channelId }: Props) {
   const { openProfile } = useProfileStore();
   const { activeAccountId, setActiveChannel } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, setActiveChannel: s.setActiveChannel })));
-  const { cache, closeDM, sendMessage, blockUser, unblockUser } = useDiscordStore(useShallow((s) => ({ cache: s.cache, closeDM: s.closeDM, sendMessage: s.sendMessage, blockUser: s.blockUser, unblockUser: s.unblockUser })));
+  const { closeDM, sendMessage, blockUser, unblockUser } = useDiscordStore(useShallow((s) => ({ closeDM: s.closeDM, sendMessage: s.sendMessage, blockUser: s.blockUser, unblockUser: s.unblockUser })));
   const { isUserMuted, muteUser, unmuteUser, isUserMutedInGuild, muteUserInGuild, unmuteUserInGuild } = useNotificationStore();
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
   const [noteValue, setNoteValue] = useState("");
@@ -45,13 +49,13 @@ export function UserContextMenu({ children, userId, guildId, channelId }: Props)
 
   const userMuted = isUserMuted(userId);
   const userMutedInGuild = guildId ? isUserMutedInGuild(guildId, userId) : false;
-  const isBlocked = activeAccountId
-    ? cache.relationships[activeAccountId]?.some((r) => r.user.id === userId && r.relationship_type === 2)
-    : false;
+  const isBlocked = useDiscordStore((s) => activeAccountId
+    ? !!s.cache.relationships[activeAccountId]?.some((r) => r.user.id === userId && r.relationship_type === 2)
+    : false);
 
   // Busca corporações/servidores da conta ativa para o submenu "Convidar para o servidor"
-  const userGuilds = activeAccountId ? cache.guilds[activeAccountId] || [] : [];
-  const userDMs = activeAccountId ? cache.dms[activeAccountId] || [] : [];
+  const userGuilds = useDiscordStore((s) => activeAccountId ? (s.cache.guilds[activeAccountId] || EMPTY_GUILDS) : EMPTY_GUILDS);
+  const userDMs = useDiscordStore((s) => activeAccountId ? (s.cache.dms[activeAccountId] || EMPTY_DMS) : EMPTY_DMS);
 
   // Tenta encontrar a DM do usuário se channelId não for explicitamente fornecido
   const targetDM = channelId

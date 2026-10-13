@@ -6,7 +6,9 @@ import { useVoiceStore } from "@/stores/voiceStore";
 import { useAccountStore } from "@/stores/accountStore";
 import { useNotificationStore } from "@/stores/notificationStore";
 import { ChannelContextMenu } from "@/components/ui/ChannelContextMenu";
-import type { DiscordChannel } from "@/types";
+import type { DiscordChannel, DiscordGuild } from "@/types";
+
+const EMPTY_ARR: DiscordGuild[] = [];
 import { Volume2, Drama, Megaphone, MessagesSquare, Search, X, ChevronRight, BellOff, Lock, RefreshCw } from "lucide-react";
 import { getGuildIconUrl, getInitials } from "@/lib/utils";
 import { getChannelPermissions } from "@/lib/permissions";
@@ -420,16 +422,14 @@ function ChannelRow({
   mentionCount?: number;
 }) {
   const { activeAccountId, activeGuildId } = useNavigationStore(useShallow((s) => ({ activeAccountId: s.activeAccountId, activeGuildId: s.activeGuildId })));
-  const { cache } = useDiscordStore(useShallow((s) => ({ cache: s.cache })));
   const type = ctype(channel);
   const isVoice = type === CT.VOICE || type === CT.STAGE;
   const icon = channelIcon(type);
   const isMuted = useNotificationStore((s) => s.isChannelMuted(channel.id));
-
-  const guilds = activeAccountId ? (cache.guilds[activeAccountId] ?? []) : [];
-  const currentMember = activeAccountId && activeGuildId
-    ? cache.guildMembers[activeAccountId]?.[activeGuildId]
-    : undefined;
+  const guilds = useDiscordStore((s) => activeAccountId ? (s.cache.guilds[activeAccountId] ?? []) : EMPTY_ARR);
+  const currentMember = useDiscordStore((s) => activeAccountId && activeGuildId
+    ? s.cache.guildMembers[activeAccountId]?.[activeGuildId]
+    : undefined);
   const currentUserId = useAccountStore
     .getState()
     .accounts.find((account) => account.id === activeAccountId)?.user_id;
