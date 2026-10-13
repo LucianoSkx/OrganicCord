@@ -1,5 +1,5 @@
 <h1>
-  <img src="src-tauri/icons/128x128.png" width="42" alt="OrganicCord logo" />
+  <img src="src-tauri/icons/128x128.png" width="42" alt="Logo do OrganicCord" />
   OrganicCord
 </h1>
 
@@ -9,21 +9,21 @@ Um cliente leve e multi-conta para Discord, de código aberto, construído com T
 > OrganicCord é um cliente **não oficial** do Discord. A Discord não oferece uma API pública completa para clientes de usuário, então mudanças no serviço podem afetar a compatibilidade. Não use este projeto para automação de contas, spam, coleta de dados ou self-bots. Mantenha o cliente oficial do Discord disponível para contas importantes.
 
 <p align="center">
-  <img src="docs/assets/organiccord-friends-preview.png" alt="An anonymized OrganicCord Friends interface preview" width="100%" />
+  <img src="docs/assets/organiccord-friends-preview.png" alt="Prévia anonimizada da interface de Amigos do OrganicCord" width="100%" />
 </p>
 
-*An anonymized preview of the OrganicCord Friends interface.*
+*Prévia anonimizada da tela de Amigos do OrganicCord.*
 
-## Beta status
+## Status beta
 
-OrganicCord é publicado na [página de releases deste fork](https://github.com/LucianoSkx/OrganicCord/releases). Esta release expande o cliente leve com processamento de voz melhorado, presença de jogos e uma experiência de chat mais responsiva. Não pretende igualar todos os recursos do cliente oficial do Discord.
+O OrganicCord é publicado na [página de releases deste fork](https://github.com/LucianoSkx/OrganicCord/releases). Esta release expande o cliente leve com processamento de voz melhorado, presença de jogos e uma experiência de chat mais responsiva. Não pretende igualar todos os recursos do cliente oficial do Discord.
 
-| Available now | Not available yet |
+| Disponível agora | Ainda não disponível |
 | --- | --- |
-| Messages, DMs, servers, friends, and presence | Video calls |
-| Voice calls in DMs and voice channels | Screen sharing / Go Live |
-| Attachments, reactions, replies, polls, and forums | Activities, soundboard, and Stage Channels |
-| Native notifications, themes, shortcuts, and multi-account sessions | Automatic updates and official macOS support |
+| Mensagens, DMs, servidores, amigos e presença | Chamadas de vídeo |
+| Chamadas de voz em DMs e canais de voz | Compartilhamento de tela / Go Live |
+| Anexos, reações, respostas, enquetes e fóruns | Activities, soundboard e Stage Channels |
+| Notificações nativas, temas, atalhos e multi-conta | Atualizações automáticas e suporte oficial a macOS |
 
 ## Windows
 
@@ -37,77 +37,77 @@ A build Linux produz `AppImage`. Voz, gateway, anexos, notificações, multi-con
 2. Mantenha o stack de portal de desktop disponível para notificações e ícone da bandeja. A bandeja precisa de `libayatana-appindicator` / `libappindicator-gtk3`; sem ele o app ainda inicia, só sem a bandeja.
 3. Rich Presence via `discord_ipc` funciona quando o Discord Desktop roda na mesma máquina (expõe o mesmo IPC sobre sockets Unix).
 
-Diagnostic logs go to `$XDG_STATE_HOME/OrganicCord/logs` (`$HOME/.local/state/OrganicCord/logs` by default). If the system keyring (secret-service/KWallet) is unavailable, the encryption key falls back to a file restricted to the user (`$XDG_DATA_HOME/OrganicCord/encryption_key`, mode `0600`), and the app logs a warning on startup.
+Logs de diagnóstico vão para `$XDG_STATE_HOME/OrganicCord/logs` (`$HOME/.local/state/OrganicCord/logs` por padrão). Se o cofre do sistema (secret-service/KWallet) estiver indisponível, a chave de criptografia usa um arquivo restrito ao usuário (`$XDG_DATA_HOME/OrganicCord/encryption_key`, modo `0600`), e o app avisa no log ao iniciar.
 
 ## O que você pode fazer
 
 ### Conversas e comunidades
 
-- Use multiple Discord accounts from one application and switch between them quickly.
-- Browse servers, organize them into folders, and access text, voice, and forum channels.
-- Send, reply to, edit, and delete your own messages.
-- Upload files and images, record voice messages, and view embeds.
-- Use emojis, reactions, polls, pinned messages, search, and Markdown formatting.
-- Chat through DMs, archive conversations, and view typing indicators, presence, and profiles.
-- Manage friends, block users, and create server invites when you have permission.
+- Use múltiplas contas do Discord em um aplicativo e alterne entre elas rapidamente.
+- Navegue por servidores, organize em pastas e acesse canais de texto, voz e fórum.
+- Envie, responda, edite e apague suas próprias mensagens.
+- Envie arquivos e imagens, grave mensagens de voz e veja embeds.
+- Use emojis, reações, enquetes, mensagens fixadas, busca e formatação Markdown.
+- Converse por DMs, arquive conversas e veja indicadores de digitação, presença e perfis.
+- Gerencie amigos, bloqueie usuários e crie convites de servidor quando tiver permissão.
 
-### Voice
+### Voz
 
-- Start, receive, answer, and decline direct-message voice calls.
-- Join and leave server voice channels.
-- Select audio input and output devices, test the microphone, and enable RNNoise suppression.
-- Mute, deafen, follow participants, and inspect the active connection state.
+- Inicie, receba, responda e recuse chamadas de voz em DM.
+- Entre e saia de canais de voz de servidores.
+- Selecione dispositivos de entrada e saída de áudio, teste o microfone e ative a supressão RNNoise.
+- Silencie, abafe, acompanhe participantes e inspecione o estado da conexão ativa.
 
-Voice transport uses Opus. A call is only treated as connected after the voice gateway, encrypted transport, and DAVE protection have completed their negotiation; a visible UI state alone is not proof of a working call.
+O transporte de voz usa Opus. Uma chamada só é tratada como conectada depois que o gateway de voz, o transporte criptografado e a proteção DAVE completam a negociação; um estado visível na interface sozinho não é prova de uma chamada funcionando.
 
-### Desktop experience
+### Experiência desktop
 
-- Receive native notifications, mention alerts, and unread indicators.
-- Mute servers, channels, or users for a chosen duration.
-- Customize themes, contrast, density, message size, app icon, and keyboard shortcuts.
-- Update your avatar, bio, and profile color. Image banners remain subject to Discord account eligibility.
-- Detect supported local games and publish a basic “Playing” presence directly through the active OrganicCord account, without requiring Discord Desktop.
+- Receba notificações nativas, alertas de menções e indicadores de não lidas.
+- Silencie servidores, canais ou usuários por um período escolhido.
+- Customise temas, contraste, densidade, tamanho das mensagens, ícone do app e atalhos de teclado.
+- Atualize seu avatar, bio e cor do perfil. Imagens de banner continuam sujeitas à elegibilidade da conta no Discord.
+- Detecte jogos locais suportados e publique uma presença básica de "Jogando" diretamente pela conta OrganicCord ativa, sem exigir o Discord Desktop.
 
-## Technical architecture
+## Arquitetura técnica
 
 ```text
 React + TypeScript + Zustand
-        │ UI and local state
+        │ UI e estado local
         ▼
-Tauri 2 — typed commands and events
+Tauri 2 — comandos e eventos tipados
         │
-Rust — sessions, REST, Gateway, permissions, voice, and files
+Rust — sessões, REST, Gateway, permissões, voz e arquivos
         │
 Discord API v10 · Gateway · Voice Gateway
 ```
 
-| Layer | Responsibility |
+| Camada | Responsabilidade |
 | --- | --- |
-| React + Zustand | Interface, navigation, message cache, and call state. |
-| Tauri | Typed bridge between the frontend and native OS capabilities. |
-| Rust | Sessions, REST, Gateway handling, rate limits, permissions, audio, and attachment handling. |
-| Gateway v10 | Real-time events, heartbeats, reconnection, and session resume. |
-| Voice | Opus, audio devices, encrypted RTP transport, and fail-closed DAVE negotiation. |
+| React + Zustand | Interface, navegação, cache de mensagens e estado de chamada. |
+| Tauri | Ponte tipada entre o frontend e capacidades nativas do sistema. |
+| Rust | Sessões, REST, tratamento de Gateway, rate limits, permissões, áudio e anexos. |
+| Gateway v10 | Eventos em tempo real, heartbeats, reconexão e resume de sessão. |
+| Voz | Opus, dispositivos de áudio, transporte RTP criptografado e negociação DAVE fail-closed. |
 
-Permissions are evaluated across server, role, member, and channel overrides. Request limits are coordinated per route, with separate handling for global rate limits.
+Permissões são avaliadas em servidor, cargo, membro e sobrescritas de canal. Limites de requisição são coordenados por rota, com tratamento separado para limites globais.
 
-## Security and privacy
+## Segurança e privacidade
 
-- The frontend does not receive or persist Discord account tokens.
-- Local credentials are encrypted, with keys protected by the operating system.
-- Files selected on disk become opaque, temporary identifiers with expiration and size limits before they are uploaded.
-- The Content Security Policy restricts script, connection, media, and embedded-navigation origins.
-- External links are validated and require confirmation before the default browser is opened.
+- O frontend não recebe nem persiste tokens de conta do Discord.
+- Credenciais locais são criptografadas, com chaves protegidas pelo sistema operacional.
+- Arquivos selecionados no disco viram identificadores opacos e temporários, com expiração e limite de tamanho, antes do upload.
+- A Content Security Policy restringe origens de script, conexão, mídia e navegação embutida.
+- Links externos são validados e exigem confirmação antes de abrir o navegador padrão.
 
-These measures reduce the attack surface, but do not eliminate the risks inherent to um cliente não oficial. Read the [Security Policy](SECURITY.md) to report vulnerabilities.
+Essas medidas reduzem a superfície de ataque, mas não eliminam os riscos inerentes a um cliente não oficial. Leia a [Política de segurança](SECURITY.md) para reportar vulnerabilidades.
 
-## Development
+## Desenvolvimento
 
-### Requirements
+### Requisitos
 
-Platform-specific; the Rust toolchain is pinned in [`rust-toolchain`](rust-toolchain).
+O toolchain Rust está fixado em [`rust-toolchain`](rust-toolchain).
 
-- **Linux**: `libwebkit2gtk-4.1`, `libgtk-3`, `librsvg`, `libasound2` and `patchelf` for building; `libayatana-appindicator3` / `libappindicator-gtk3` for the tray icon;
+- **Linux**: `libwebkit2gtk-4.1`, `libgtk-3`, `librsvg`, `libasound2` e `patchelf` para compilar; `libayatana-appindicator3` / `libappindicator-gtk3` para o ícone da bandeja;
 - **Ambos**: Node.js 24 (`>=24 <25`) e Rust `1.89.0`.
 
 ```bash
@@ -120,22 +120,22 @@ sudo pacman -S webkit2gtk-4.1 base-devel curl wget file openssl \
   xdotool libayatana-appindicator librsvg alsa-lib patchelf
 ```
 
-### Run locally
+### Rodar localmente
 
 ```bash
 npm ci
 npm run tauri:dev
 ```
 
-Bundle the `AppImage`:
+Gere o `AppImage`:
 
 ```bash
 npm run tauri:build
 ```
 
-On some distributions linuxdeploy ships an old `strip` that fails on `RELR` sections; build the AppImage with `NO_STRIP=1 npm run tauri:build -- --bundles appimage`.
+Em algumas distribuições o linuxdeploy traz um `strip` antigo que falha em seções `RELR`; gere o AppImage com `NO_STRIP=1 npm run tauri:build -- --bundles appimage`.
 
-### Validate the project
+### Validar o projeto
 
 ```bash
 npm run type-check
@@ -150,15 +150,15 @@ cargo test --all-targets
 cargo audit
 ```
 
-## Documentation and contributing
+## Documentação e contribuição
 
-- [Contributing guide](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
-- [Official repository](https://github.com/LucianoSkx/OrganicCord)
-- [Creator portfolio](https://damodara.xyz)
+- [Guia de contribuição](CONTRIBUTING.md)
+- [Política de segurança](SECURITY.md)
+- [Repositório deste fork](https://github.com/LucianoSkx/OrganicCord)
+- [Autor do projeto original](https://damodara.xyz)
 
-Protocol changes should reference official documentation whenever available, include tests, and avoid compatibility claims without real transport, encryption, and media evidence.
+Mudanças de protocolo devem referenciar a documentação oficial sempre que disponível, incluir testes e evitar afirmações de compatibilidade sem evidência real de transporte, criptografia e mídia.
 
-## License
+## Licença
 
-OrganicCord is released under the MIT License. The adapted copy of [`hpke-rs`](src-tauri/vendor/hpke-rs) remains under MPL-2.0; see its [`PATCH.md`](src-tauri/vendor/hpke-rs/PATCH.md).
+OrganicCord é distribuído sob licença MIT. A cópia adaptada de [`hpke-rs`](src-tauri/vendor/hpke-rs) permanece sob MPL-2.0; veja o [`PATCH.md`](src-tauri/vendor/hpke-rs/PATCH.md).
