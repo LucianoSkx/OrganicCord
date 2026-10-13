@@ -3,7 +3,7 @@
   OrganicCord
 </h1>
 
-Um cliente leve e multi-conta para Discord, de código aberto, construído com Tauri, Rust, React e TypeScript. Windows é a plataforma de referência; o Linux é primeira classe (build `AppImage`).
+Um cliente leve e multi-conta para Discord, de código aberto, construído com Tauri, Rust, React e TypeScript. Este fork dá suporte ao Linux, com build `AppImage`.
 
 > [!WARNING]
 > OrganicCord é um cliente **não oficial** do Discord. A Discord não oferece uma API pública completa para clientes de usuário, então mudanças no serviço podem afetar a compatibilidade. Não use este projeto para automação de contas, spam, coleta de dados ou self-bots. Mantenha o cliente oficial do Discord disponível para contas importantes.
@@ -25,25 +25,9 @@ OrganicCord é publicado na [página de releases deste fork](https://github.com/
 | Attachments, reactions, replies, polls, and forums | Activities, soundboard, and Stage Channels |
 | Native notifications, themes, shortcuts, and multi-account sessions | Automatic updates and official macOS support |
 
-## Install on Windows
+## Windows
 
-Este fork publica o `AppImage` do Linux. No Windows, use o instalador do [projeto original](https://github.com/aMathyzinn/OrganicCord/releases) ou construa localmente (abaixo).
-
-1. Baixe `OrganicCord_0.3.0-beta.1_x64-setup.exe` da [release page](https://github.com/aMathyzinn/OrganicCord/releases/tag/v0.3.0-beta.1) do projeto original.
-2. Run the installer on a Windows 10 or Windows 11 computer with WebView2 installed.
-3. Sign in and grant only the permissions required by the features you choose to use.
-
-The current installer is not code-signed yet. Windows may show an unknown publisher warning; verify that the file came from the official release and check its hash before installing. Do not disable Windows security features to run the app.
-
-```powershell
-Get-FileHash .\OrganicCord_0.3.0-beta.1_x64-setup.exe -Algorithm SHA256
-```
-
-`v0.3.0-beta.1` (upstream) SHA-256:
-
-```text
-4ED50107A54324694462F48CA2AFCF374838EA6AE075C90B458EF30059A00FED
-```
+Este fork dá suporte apenas ao Linux. No Windows, use o instalador do [projeto original](https://github.com/aMathyzinn/OrganicCord/releases) — não é assinado, então o Windows pode avisar sobre publicante desconhecido. Verifique o SHA-256 antes de instalar e não desative recursos de segurança para rodar o app.
 
 ## Instalar no Linux (suporte de primeira classe)
 
@@ -78,7 +62,7 @@ Voice transport uses Opus. A call is only treated as connected after the voice g
 
 ### Desktop experience
 
-- Receive native Windows notifications, mention alerts, and unread indicators.
+- Receive native notifications, mention alerts, and unread indicators.
 - Mute servers, channels, or users for a chosen duration.
 - Customize themes, contrast, density, message size, app icon, and keyboard shortcuts.
 - Update your avatar, bio, and profile color. Image banners remain subject to Discord account eligibility.
@@ -123,9 +107,8 @@ These measures reduce the attack surface, but do not eliminate the risks inheren
 
 Platform-specific; the Rust toolchain is pinned in [`rust-toolchain`](rust-toolchain).
 
-- **Windows**: Windows 10 or 11 with WebView2, and Visual Studio C++ Build Tools for the audio backend;
 - **Linux**: `libwebkit2gtk-4.1`, `libgtk-3`, `librsvg`, `libasound2` and `patchelf` for building; `libayatana-appindicator3` / `libappindicator-gtk3` for the tray icon;
-- **Both**: Node.js 24 (`>=24 <25`) and Rust `1.89.0`.
+- **Ambos**: Node.js 24 (`>=24 <25`) e Rust `1.89.0`.
 
 ```bash
 # Debian/Ubuntu
@@ -144,7 +127,7 @@ npm ci
 npm run tauri:dev
 ```
 
-Bundle for the current platform (Windows produces the NSIS installer, Linux produces the `AppImage`):
+Bundle the `AppImage`:
 
 ```bash
 npm run tauri:build
@@ -166,15 +149,6 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-targets
 cargo audit
 ```
-
-### Build a local NSIS installer
-
-```powershell
-$env:CARGO_TARGET_DIR = "$PWD\src-tauri\target-installer"
-npm run tauri:build -- --bundles nsis
-```
-
-Using an isolated build directory avoids conflicts with an already-running OrganicCord instance. Always verify an installer by version, timestamp, and SHA-256 before distributing it.
 
 ## Documentation and contributing
 
