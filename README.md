@@ -3,10 +3,10 @@
   TerraCord (fork Linux)
 </h1>
 
-An open-source, lightweight, multi-account desktop client for Discord. TerraCord (fork Linux) brings conversations, communities, voice, presence, and notifications into a focused native desktop experience built with Tauri, Rust, React, and TypeScript. Windows is the reference platform; a Linux build is also available (see [Install on Linux](#install-on-linux-experimental)).
+Um cliente leve e multi-conta para Discord, de código aberto, construído com Tauri, Rust, React e TypeScript. Windows é a plataforma de referência; o Linux é primeira classe (build `.deb` + `AppImage`).
 
 > [!WARNING]
-> TerraCord (fork Linux) is an **unofficial** Discord client. Discord does not provide a public, supported API for complete user clients, so service changes can affect compatibility. Do not use this project for account automation, spam, data harvesting, or self-bots. Keep the official Discord client available for important accounts.
+> TerraCord (fork Linux) é um cliente **não oficial** do Discord. A Discord não oferece uma API pública completa para clientes de usuário, então mudanças no serviço podem afetar a compatibilidade. Não use este projeto para automação de contas, spam, coleta de dados ou self-bots. Mantenha o cliente oficial do Discord disponível para contas importantes.
 
 <p align="center">
   <img src="docs/assets/organiccord-friends-preview.png" alt="An anonymized TerraCord (fork Linux) Friends interface preview" width="100%" />
@@ -43,19 +43,19 @@ Get-FileHash .\TerraCord (fork Linux)_0.3.0-beta.1_x64-setup.exe -Algorithm SHA2
 4ED50107A54324694462F48CA2AFCF374838EA6AE075C90B458EF30059A00FED
 ```
 
-## Instalar no Linux (experimental)
+## Instalar no Linux (suporte de primeira classe)
 
-The Linux build produces a `.deb` and an `AppImage`. Voice, gateway, attachments, notifications, multi-account, and the login webview are functional; game detection also matches Linux/Proton processes. Screen sharing is not available on any platform yet.
+A build Linux produz `.deb` e `AppImage`. Voz, gateway, anexos, notificações, multi-conta e login por QR estão funcionando; detecção de jogos também corresponde a processos Linux/Proton. Compartilhamento de tela não está disponível em nenhuma plataforma ainda.
 
-1. Install `TerraCord (fork Linux)_0.3.0-beta.1_amd64.deb` (or run the `AppImage`).
-2. Keep the desktop portal stack available for notifications and the tray icon. The tray needs `libayatana-appindicator` / `libappindicator-gtk3`; without it the app still starts, just without the tray.
-3. Rich Presence via `discord_ipc` works when Discord Desktop runs on the same machine (it exposes the same IPC over Unix sockets).
+1. Instale `TerraCord_0.3.0-beta.1_amd64.deb` (ou execute o `AppImage`).
+2. Mantenha o stack de portal de desktop disponível para notificações e ícone da bandeja. A bandeja precisa de `libayatana-appindicator` / `libappindicator-gtk3`; sem ele o app ainda inicia, só sem a bandeja.
+3. Rich Presence via `discord_ipc` funciona quando o Discord Desktop roda na mesma máquina (expõe o mesmo IPC sobre sockets Unix).
 
 Diagnostic logs go to `$XDG_STATE_HOME/TerraCord (fork Linux)/logs` (`$HOME/.local/state/TerraCord (fork Linux)/logs` by default). If the system keyring (secret-service/KWallet) is unavailable, the encryption key falls back to a file restricted to the user (`$XDG_DATA_HOME/TerraCord (fork Linux)/encryption_key`, mode `0600`), and the app logs a warning on startup.
 
-## What you can do
+## O que você pode fazer
 
-### Conversations and communities
+### Conversas e comunidades
 
 - Use multiple Discord accounts from one application and switch between them quickly.
 - Browse servers, organize them into folders, and access text, voice, and forum channels.
