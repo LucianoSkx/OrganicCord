@@ -4,11 +4,10 @@ import { useAccountStore } from "@/stores/accountStore";
 import type { StoredAccount } from "@/types";
 import { QrLoginStep } from "./QrLoginStep";
 import { toast } from "@/components/ui/Toast";
-import { startDiscordLogin, cancelDiscordLogin } from "@/lib/tauri";
+import { cancelDiscordLogin } from "@/lib/tauri";
 import { listen } from "@tauri-apps/api/event";
 import { OrganicMark } from "@/components/ui/OrganicMark";
 import {
-  MonitorSmartphone,
   Smartphone,
   Key,
   ShieldCheck,
@@ -25,7 +24,7 @@ import {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-type AuthTab = "webview" | "qr" | "token";
+type AuthTab = "qr" | "token";
 type AuthStep = "idle" | "validating" | "success" | "error";
 type FeatureTab = "multiaccounts" | "voice" | "privacy";
 
@@ -36,7 +35,7 @@ interface Props {
 // ─── Main WelcomeHub ─────────────────────────────────────────────────────────
 
 export function WelcomeHub({ onSuccess }: Props) {
-  const [authTab, setAuthTab] = useState<AuthTab>("webview");
+  const [authTab, setAuthTab] = useState<AuthTab>("qr");
   const [featureTab, setFeatureTab] = useState<FeatureTab>("multiaccounts");
 
   return (
@@ -383,17 +382,6 @@ function AuthPanel({
     }
   }, [activeTab]);
 
-  const handleWebviewLogin = async () => {
-    setStep("validating");
-    setErrorMsg("");
-    try {
-      await startDiscordLogin();
-    } catch (e) {
-      setErrorMsg(String(e).replace(/^Error:\s*/, ""));
-      setStep("error");
-    }
-  };
-
   const handleTokenSubmit = async () => {
     const trimmed = token.trim();
     if (!trimmed) { setErrorMsg("Cole seu token para continuar."); return; }
@@ -484,10 +472,6 @@ function AuthPanel({
           </div>
         )}
 
-        {activeTab === "webview" && (
-          <WebviewTab onLogin={handleWebviewLogin} />
-        )}
-
         {activeTab === "qr" && (
           <QrTab onSuccess={onSuccess} />
         )}
@@ -503,57 +487,6 @@ function AuthPanel({
           />
         )}
       </div>
-    </div>
-  );
-}
-
-// ─── Tab: Webview ─────────────────────────────────────────────────────────────
-
-function WebviewTab({ onLogin }: { onLogin: () => void }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {/* Primary CTA */}
-      <button
-        onClick={onLogin}
-        style={styles.primaryButton}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background =
-            "linear-gradient(135deg, #6875f5 0%, #5865f2 100%)";
-          e.currentTarget.style.boxShadow =
-            "0 8px 28px rgba(88,101,242,0.4), inset 0 1px 0 rgba(255,255,255,0.15)";
-          e.currentTarget.style.transform = "translateY(-1px)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background =
-            "linear-gradient(135deg, #5865f2 0%, #4752c4 100%)";
-          e.currentTarget.style.boxShadow =
-            "0 4px 20px rgba(88,101,242,0.3), inset 0 1px 0 rgba(255,255,255,0.1)";
-          e.currentTarget.style.transform = "translateY(0)";
-        }}
-        onMouseDown={(e) => {
-          e.currentTarget.style.transform = "translateY(1px)";
-          e.currentTarget.style.boxShadow =
-            "0 2px 10px rgba(88,101,242,0.25)";
-        }}
-      >
-        <MonitorSmartphone size={18} />
-        <span>Abrir página de login</span>
-      </button>
-
-      {/* Security checklist */}
-      <div style={styles.securityList}>
-        {["Página carregada de discord.com", "2FA e Captcha tratados pelo Discord", "Sessão importada somente neste dispositivo"].map((item) => (
-          <div key={item} style={styles.securityItem}>
-            <div style={styles.securityDot} />
-            <span>{item}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Info note */}
-      <p style={styles.infoNote}>
-        OrganicCord não é um cliente oficial e este fluxo não é uma integração OAuth2 suportada. A página recebe suas credenciais e o aplicativo importa localmente a sessão resultante. Use uma conta de testes nesta Beta.
-      </p>
     </div>
   );
 }
